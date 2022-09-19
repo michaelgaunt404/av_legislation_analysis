@@ -1,0 +1,390 @@
+---
+title: 'Sliced Comp: Predict NYC Airbnb listing prices'
+author: ''
+date: '2021-07-24'
+slug: sliced-comp-predict-nyc-airbnb-listing-prices
+categories: ["R", "Machine Learning"]
+tags: ["regression", "tidymodels"]
+description: Goal of this markdown is to predict Airbnb listings in NYC.
+image: ~
+math: ~
+license: ~
+hidden: no
+comments: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  cache = FALSE, cache.lazy = FALSE, autodep = TRUE, warning = FALSE, 
+  message = FALSE, echo = TRUE, dpi = 180,
+  fig.width = 8, fig.height = 5, echo = FALSE
+  )
+```
+
+<!--#general comments===========================================================
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# This is [[insert description here - what it does/solve]]
+#
+# By: mike gaunt, michael.gaunt@wsp.com
+#
+# README: [[insert brief readme here]]
+#-------- [[insert brief readme here]]
+#
+# *please use 80 character margins
+# *please go to https://pkgs.rstudio.com/flexdashboard/articles/layouts.html
+# to explore the different layouts available for the flexdashboard framework
+#
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ -->
+
+<!--#library set-up=============================================================
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#content in this section should be removed if in production - ok for dev -->
+This is the last analyis that I perfromed on this project. This document was supposed to be a blog post but I never finished it, I will leave comments in for explinations of what the code does
+
+## Loading Packages
+
+Here I load both the tidyverse and tidymodels packages. The former is a catchall package which installs the entire tidyverse suite of packages which provide functions for basic data manipulation, the latter is a also conveniently loads a number of machine learning packages which play nicely with tidyverse packages.  
+```{r include = TRUE}
+library(tidyverse) #all tidyverse packages
+library(tidymodels) #modeling framework and packages
+library(here) #helps with file paths
+library(data.table) 
+library(lubridate)
+library(tidytext)  #text mining and manipulation package
+library(textrecipes) #tidymodels recipes for text analysis
+# library(textfeatures)
+# library(textclean)
+library(tidytext)
+library(textstem)
+
+library(factoextra)
+```
+
+<!--#source helpers/utilities===================================================
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#content in this section should be removed if in production - ok for dev -->
+
+<!--#source data================================================================
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#content in this section should be removed if in production - ok for dev 
+#area to upload data with and to perform initial munging
+#please add test data here so that others may use/unit test these scripts -->
+
+```{r}
+# bill_data = readRDS(here::here(
+#   "data/scraped_legislation_2021-06-18.rds")
+# )
+# #don't have to run this until the data is scraped again
+# # big_list_node_text = readRDS(here::here("data/big_list_node_text.rds"))
+# #
+# # big_list_node_td = readRDS(here::here("data/big_list_node_td.rds"))
+# #
+# 
+# # legislation_df = tibble(state = bill_data$state[-c(497:498)],
+# #        bill_name = bill_data$bill_name[-c(497:498)],
+# #        text = unlist(big_list_node_text))
+# # #
+# # legislation_df %>%
+# #   saveRDS(str_glue("./data/legislation_df_{Sys.Date()}.rds"))
+
+legislation_df = 
+  here("data/legislation_df_2021-06-24.rds") %>% 
+  readRDS()
+
+legislation_df_sample = legislation_df %>%  
+  sample_n(100) %>%  
+  filter(str_count(text)<10000)
+```
+
+
+## Intrduction
+
+
+<!--#SECTION NAME===============================================================
+#use this header to make demarcations/section in code [delete this line]
+#short description -->
+
+## Basic Data Exploration 
+```{r}
+
+clean_stopwords = function(data){
+  # currently requires sting column to be called "text"
+  data %>% 
+    unnest_tokens(word, text) %>%
+    anti_join(stop_words) %>%
+    nest(data = word) %>%  
+    mutate(text = map(data, unlist),
+           text = map_chr(text, paste, collapse = " "))
+}
+
+unnest_tokens(word, text) %>%
+  count(state, bill_name, word, sort = TRUE) 
+
+tmp = legislation_df_sample %>% 
+  clean_stopwords() %>%  
+  unnest_tokens(word, text) %>%
+  count(state, bill_name, word, sort = F) %>%  
+  group_by(state, bill_name) %>%  
+  mutate(number_words = sum(n), 
+         number_words_unique = n(), 
+         unique_word_ratio = number_words_unique/number_words) %>%  
+  filter()
+
+tmp %>%  
+  select(!c(word, n)) %>%  
+  unique() %>%  
+  ggplot() + 
+  geom_col(aes(bill_name, unique_word_ratio, fill = (number_words)))
+```
+
+I tried using the textfeatures package but it didn't really produce anything interesting. Potntetially better for something that doesn;t use legalalize. 
+```{r}
+legislation_df_sample %>%  
+  textfeatures::textfeatures() %>%  
+  autoplot()
+```
+
+
+```{r}
+short_data <- data.frame(text = c(
+  "class classes a classless shorter classy classic,",
+  "With many cats and ladies lady"
+))
+
+recipe(~text, data = short_data) %>%
+  step_tokenize(text, engine = "spacyr") %>%
+  step_lemma(text) %>%
+  step_tf(text) %>%  
+  prep() %>%  
+  juice()
+
+leg_text <- recipe( ~ bill_name + text, data = tmp) %>%
+  step_tokenize(text, engine = "spacyr") %>%
+  step_lemma(text) %>%
+  step_tf(text)  
+
+leg_text_juiced = leg_text %>%  
+  prep() %>%  
+  juice()
+
+leg_text_juiced %>%  
+  pivot_longer(cols = starts_with("tf_text")) %>%  
+  arrange(bill_name, -value) %>% 
+  group_by(bill_name) %>% 
+  top_n(10) %>%  
+  mutate(bill_name = fct_infreq(bill_name)) %>% 
+  ggplot() + 
+  geom_col(aes(name, value)) + 
+  facet_wrap(vars(bill_name), scales = "free") +
+  coord_flip() 
+
+
+leg_text %>%  
+  prep() %>%  
+  juice() %>% 
+  colnames()  %>% 
+  data.frame(yolo = .) %>% 
+  sample_n(200) %>%  
+  sort(yolo)
+```
+
+
+```{r}
+leg_text <- recipe( ~ bill_name + text, data = legislation_df_sample) %>%
+  step_mutate(text = replace_contraction(text) %>%
+                lemmatize_strings()) %>% 
+  step_tokenize(text,
+                token = "words",
+                options = list(lowercase = TRUE,
+                               strip_punct = TRUE,
+                               stopwords = stop_words$word,
+                               strip_numeric = TRUE)) %>%
+  step_tf(text) %>% 
+  step_nzv(all_predictors())
+
+data_leg = leg_text %>%  
+  prep() %>%  
+  juice() %>%  
+  filter(!duplicated(bill_name)) %>% 
+  column_to_rownames(var = "bill_name")
+  
+data_leg %>% 
+    pivot_longer(cols = starts_with("tf_text")) %>%  
+  arrange(bill_name, -value) %>% 
+  group_by(bill_name) %>% 
+  top_n(10) %>%  
+  mutate(bill_name = fct_infreq(bill_name)) %>% 
+  ggplot() + 
+  geom_tile(aes(bill_name, name, fill = value))
+
+data_leg %>%  
+  filter(!duplicated(bill_name)) %>% 
+  column_to_rownames(var = "bill_name") %>% 
+  as.matrix() %>%  
+  heatmaply()
+  heatmap()
+  
+x  <- as.matrix(mtcars)
+rc <- rainbow(nrow(x), start = 0, end = .3)
+cc <- rainbow(ncol(x), start = 0, end = .3)
+hv <- heatmap(x, col = cm.colors(256), scale = "column",
+              RowSideColors = rc, ColSideColors = cc, margins = c(5,10),
+              xlab = "specification variables", ylab =  "Car Models",
+              main = "heatmap(<Mtcars data>, ..., scale = \"column\")")
+```
+
+```{r}
+data_leg %>%  
+  dist(method = "euclidean") %>% 
+  hclust(method = "ward.D2") %>% 
+  coef.hclust()
+```
+
+```{r}
+method <- c( "average", "single", "complete", "ward")
+names(method) <- c( "average", "single", "complete", "ward")
+
+metric = c("euclidean", "manhattan")
+names(metric) = c("euclidean", "manhattan")
+
+linkage <- c("ward.D", "ward.D2", "single", "complete", "average", "mcquitty", "median", "centroid")
+names(linkage) <- c("ward.D", "ward.D2", "single", "complete", "average", "mcquitty", "median", "centroid")
+
+distance = c("euclidean", "maximum", "manhattan", "canberra", "binary", "minkowski")
+names(distance) = c("euclidean", "maximum", "manhattan", "canberra", "binary", "minkowski")
+
+# function to compute coefficient
+ac <- function(x, y) {
+  agnes(data_leg, method = x, metric = y)$ac
+}
+
+distance = "binary"
+linkage = "mcquitty"
+
+make_agg_coeff =  function(x, y) {
+  data_leg %>%  
+    dist(method = x) %>% 
+    hclust(method = y) %>% 
+    coef.hclust()
+}
+
+plus2 <- function(x, y, ...) x + y
+ac <- function(method, metric, ...) agnes(data_leg, method, metric)$ac
+
+diana(data_leg)$dc
+
+df = crossing(distance, linkage) %>%  
+  head(2) %>% 
+    mutate(ac = make_agg_coeff(distance, linkage)) 
+
+  mutate(ac = map2_dbl(distance, linkage, make_agg_coeff)) %>%  
+  arrange(-ac)
+
+ map2_dbl(distance, linkage, make_agg_coeff)
+
+```
+
+```{r}
+
+crossing()
+
+
+hc5 = data_leg %>%  
+  dist(method = "minkowski") %>% 
+  hclust(method = "ward.D2")
+plot(hc5, cex = 0.6)
+rect.hclust(hc5, k = 5, border = 2:5)
+
+sub_grp <- cutree(hc5, k = 5)
+
+fviz_cluster(list(data = data_leg, cluster = sub_grp))
+```
+
+# Adding PCA to Recipe
+```{r}
+leg_text = recipe( ~ bill_name + text, data = legislation_df_sample) %>%
+  step_mutate(text = replace_contraction(text) %>%
+                lemmatize_strings()) %>% 
+  step_tokenize(text,
+                token = "words",
+                options = list(lowercase = TRUE,
+                               strip_punct = TRUE,
+                               stopwords = stop_words$word,
+                               strip_numeric = TRUE)) %>%
+  step_tf(text) %>% 
+  step_nzv(starts_with("tf_")) %>% 
+  step_normalize(starts_with("tf_")) %>% 
+  step_pca(starts_with("tf_"), threshold = .8)
+
+data_leg = leg_text %>%  
+  prep() %>%  
+  juice() 
+
+pca_leg = prep(leg_text)
+pca_rec
+
+pca_prep %>% 
+  tidy() %>%
+  filter(component %in% paste0("PC", 1:5)) %>%
+  mutate(component = fct_inorder(component)) %>%
+  ggplot(aes(value, terms, fill = terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~component, nrow = 1) +
+  labs(y = NULL)
+
+tidy(pca_prep, 2)
+tidy(pca_leg, 6) %>%  
+  filter(component %in% paste0("PC", 1:10)) %>%
+  mutate(component = fct_inorder(component)) %>%
+  ggplot(aes(value, terms, fill = terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~component, nrow = 1) +
+  labs(y = NULL)
+
+tidy(pca_leg, 6) %>%  
+  filter(component %in% paste0("PC", 1:10)) %>%
+  group_by(component) %>%
+  top_n(5, abs(value)) %>%
+  ungroup() %>%
+  mutate(terms = reorder_within(terms, abs(value), component)) %>%
+  ggplot(aes(abs(value), terms, fill = value > 0)) +
+  geom_col() +
+  facet_wrap(~component, scales = "free_y") +
+  scale_y_reordered() +
+  labs(
+    x = "Absolute value of contribution",
+    y = NULL, fill = "Positive?"
+  )
+
+
+sdev <- pca_leg$steps[[6]]$res$sdev
+
+percent_variation <- sdev^2 / sum(sdev^2)
+
+tibble(
+  component = unique(tidy(pca_leg, 6)$component),
+  percent_var = percent_variation ## use cumsum() to find cumulative, if you prefer
+) %>%  
+  mutate(percent_var = cumsum(percent_var)) %>%
+  mutate(component = fct_inorder(component)) %>%
+  ggplot(aes(component, percent_var)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(x = NULL, y = "Percent variance explained by each PCA component") +
+  coord_flip()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,225 @@
+---
+title: av_bill_scrape
+author: Mike Gaunt
+date: '2022-01-19'
+slug: av-bill-scrape
+categories: []
+tags: []
+description: ~
+image: ~
+math: ~
+license: ~
+hidden: no
+comments: yes
+---
+
+<!--#general comments===========================================================
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# This is [[insert description here - what it does/solve]]
+#
+# By: mike gaunt, michael.gaunt@wsp.com
+#
+# README: [[insert brief readme here]]
+#-------- [[insert brief readme here]]
+#
+# *please use 80 character margins
+# *please go to https://pkgs.rstudio.com/flexdashboard/articles/layouts.html
+# to explore the different layouts available for the flexdashboard framework
+#
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ -->
+
+<!--#library set-up=============================================================
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#content in this section should be removed if in production - ok for dev -->
+```{r}
+library(tidyverse)
+library(data.table)
+library(lubridate)
+library(future) #to run processes in parallel 
+
+#the packages below are used to scrape data from the web
+library(rvest)
+library(httr)
+library(XML)
+library(RSelenium)
+```
+
+<!--#source helpers/utilities===================================================
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#content in this section should be removed if in production - ok for dev -->
+```{r}
+
+```
+
+<!--#source data================================================================
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#content in this section should be removed if in production - ok for dev 
+#area to upload data with and to perform initial munging
+#please add test data here so that others may use/unit test these scripts -->
+
+
+
+
+## Intro
+
+Data from [here](https://www.ncsl.org/research/transportation/autonomous-vehicles-legislative-database.aspx)
+
+The code is the below chunk defines the driver to connect to internet, assigns a client, and the opens the client. Effectively, it opens a blank internet page via the browser driver and port that you define. 
+```{r}
+#start driver
+rD <- rsDriver(browser = 'firefox', port = 4444L)
+
+# Assign the client
+remDr <- rD$client
+
+#open client
+remDr$open()
+
+# Navigate to website
+appurl <- "https://www.ncsl.org/research/transportation/autonomous-vehicles-legislative-database.aspx"
+remDr$navigate(appurl)
+```
+
+Now that the table has been made by interacting with it, I can now scrape the contents as I would normally using static scraping methods. Scraping this table just gets me unique bill-https address pairs. 
+```{r}
+scraped_raw_html =
+  remDr$getPageSource()[[1]] %>%
+  read_html() %>%
+  rvest::html_nodes(".ModNCSLStateNetC div div+ div a")
+
+bill_data = data.table(bill_name = scraped_raw_html %>%
+                html_text() %>% 
+                  str_squish(),
+              bill_https = scraped_raw_html %>%
+                html_attr('href')) %>%
+  .[,`:=`(state = gsub(" .*", "\\1", bill_name))] %>%
+  .[-1,]
+
+remDr$close()
+```
+
+```{r}
+bill_data %>% 
+  mutate(bill_https = bill_https %>%  
+           str_trunc(100)) %>%  
+  head(20)
+```
+
+```{r}
+scrape_av = function(url){
+  xml2::read_html(url)
+}
+
+safe_scrape_av = safely(scrape_av)
+
+good_results_only = function(data){
+  data %>%
+    .["result"] %>%
+    .[[1]]
+}
+
+# safe_scrape_av("http://custom.statenet.com/public/resources.cgi?id=ID:bill:NE2021000LR155&ciq=ncsl&client_md=f7c67ad6586790b8f40642a8ca270382&mode=current_text") %>% 
+#   good_results_only()
+```
+
+
+
+```{r}
+
+
+saveRDS(bill_data, here::here(
+  str_glue("data/scraped_legislation_{Sys.Date()}.rds")
+  ))
+
+bill_data = read_rds(here::here(
+  "data/scraped_legislation_2021-06-18.rds")
+)
+
+
+
+
+```
+
+
+```{r}
+tictoc::tic()
+large_html_scrape_text = bill_data %>%
+  sample_n(10) %>%
+  .$bill_html %>%
+  map(~{
+    Sys.sleep(5)
+    safe_scrape_av(.x) #%>%
+      # good_results_only()
+  })
+tictoc::toc()
+
+tictoc::tic()
+large_html_scrape_text = bill_data %>%
+  sample_n(3) %>%
+  nest(data = bill_https) %>%  
+  mutate(scraped_html = map(data, ~{
+    # Sys.sleep(5)
+    # print()
+    safe_scrape_av(.x$bill_https) %>%  
+      good_results_only() %>% 
+      html_nodes(".text") 
+    # %>%
+    #     html_text()
+  }))
+tictoc::toc()
+
+temp = large_html_scrape_text %>%  
+  mutate(text = map(scraped_html, 
+                    ~{
+    # Sys.sleep(5)
+    # print(.x[[1]])
+                      .x[[1]] %>%  
+                        html_text()
+
+    # %>%
+    #     html_text()
+  }
+                    
+                    
+                    # html_nodes, ".text")
+         
+         )) %>%  
+  unnest(cols = text)
+  nest(cols = scraped_html)
+
+temp %>%  
+  unnest(cols = cols)
+
+large_html_scrape_text[1,4] %>% 
+  
+  unnest(cols = scraped_html)
+
+big_list_node_text = big_list_scraped_html %>%
+  map(~html_nodes(.x, ".text") %>%
+        html_text())
+
+html_nodes(.x, ".text") %>%
+        html_text()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

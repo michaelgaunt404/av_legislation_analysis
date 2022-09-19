@@ -1,0 +1,851 @@
+---
+title: "TTP 220_Project"
+author: "Mike Gaunt"
+date: "April 21, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo = FALSE, results='hide', message=FALSE, warning=FALSE}
+#library(pdftools) #reads pdf files
+library(pacman)
+library(quanteda)
+library(ISLR)
+
+library(SemNetCleaner) #singualarize words
+library(stringi)
+library(stringr) #used
+library(tm)
+library(tidytext) #Text mining
+library(topicmodels) #for LDA 
+library(htmlwidgets)
+library(openintro) #for case conversion
+
+
+#library(readr) #all purpose file reader
+library(readxl) #required for xmls files
+library(dplyr) #Data manipulation (also included in the tidyverse package)
+library(plyr)
+library(magrittr) #reorders fucntion calling
+library(tidyr) #Spread, separate, unite, text mining (also included in the tidyverse package)
+# library(widyr) #Use for pairwise correlation
+
+#for viz
+# library(formattable)
+library(grid)
+library(gridExtra) #plot muliple grobs
+library(ggplot2)
+# library(RColorBrewer) #makes own color palettes
+# library(naniar) #Shows missing data 
+# library(waffle) #pie chart alternative
+
+library(knitr) # for dynamic reporting
+library(kableExtra) # create a nicely formated HTML table
+library(formattable) # for the color_tile function
+
+```
+
+**Data Prep**
+```{r results='hide', message=FALSE, warning=FALSE}
+#2012-2016 data has been preprocessed out of 'R' for the sake of expediency 
+av.2012 = read_xlsx("./Data/Av2012_2016.xlsx", sheet = 1, col_names = FALSE)
+av.2013 = read_xlsx("./Data/Av2012_2016.xlsx", sheet = 2, col_names = FALSE)
+av.2014 = read_xlsx("./Data/Av2012_2016.xlsx", sheet = 3, col_names = FALSE)
+av.2015 = read_xlsx("./Data/Av2012_2016.xlsx", sheet = 4, col_names = FALSE)
+av.2016 = read_xlsx("./Data/Av2012_2016.xlsx", sheet = 5, col_names = FALSE)
+
+av.12.16 = rbind.data.frame(av.2012, av.2013, av.2014, av.2015, av.2016)
+colnames(av.12.16) = c("state", "name", "text", "year", "status")
+
+#changing variable data types
+av.12.16$state = as.factor(av.12.16$state)
+av.12.16$year = as.integer(av.12.16$year)
+av.12.16$status = as.factor(av.12.16$status)
+av.12.16$text = str_to_lower(av.12.16$text)
+```
+
+```{r results='hide', message=FALSE, warning=FALSE}
+#2017-2019 data requires in code processing 
+yolo = readLines("./Data/Autonomous Vehicles State Bill Tracking Database_ALL STATES_2017 2019.txt") 
+yolo = tibble(text = yolo)
+yolo.df = as.data.frame(yolo)
+```
+
+```{r results='hide', message=FALSE, warning=FALSE}
+#preprocessing
+yolo.df$text = str_to_lower(yolo.df$text)
+yolo.df$text = gsub("\f", "", yolo.df$text)
+
+#chunk finds and deletes empty indexs
+empty.indexs = which(yolo.df$text == "")
+yolo.df = as.data.frame(yolo.df[-empty.indexs,], stringsAsFactors = FALSE)
+colnames(yolo.df) = "text"
+```
+
+```{r}
+#uses external "state" name data 
+#turns data into a df, gets abbreviations for states, and makes empty index row
+states = as.data.frame(state.name)
+states$abbr = tolower(state2abbr(state.name))
+states$region = state.region
+
+#currently having issues with correctly classifying oregon abbrevaiton "or" vs the word "or"
+states = states[-37,] 
+```
+
+```{r}
+#tmp copy of states data with only first three charactors per line
+#this step makes it easier to predict true state bill names and indices
+tmp = substr(yolo.df$text, 0, 3)
+
+state.indx = list("")
+
+#loops over all states and searches for rows indices from and returns list of occurances
+for(i in 1:nrow(states)) { 
+  states$indx[i] = list(which(str_detect(tmp, paste(states[i,2], ""))))
+  state.indx[[i]] = list(which(str_detect(tmp, paste(states[i,2], ""))))
+}
+
+# indx = which(str_detect(substr(yolo.df$text, 0, 3), paste((state.abb), collapse = '|')))
+# yolo.df[indx,]
+
+#Removes states that don't have any legislation 
+state.indx = state.indx[lapply(state.indx, lengths) > 0 ]
+```
+
+```{r}
+#iterates over state indices list 
+#i-loop creates temporary variable for a singular state's index list
+#j-loop iterates over length of a state's number of found indices
+#ifelse statement determines idexing pairs which is used to subset dataset into indicidual bill occurances.
+slice = c()
+
+for (i in 1:length(state.indx)) { 
+  tmp = state.indx[[i]]
+  
+    for (j in 1:(lengths(tmp))) {
+      
+      slice = c(slice, ifelse(j != lengths(tmp),
+                          list(tmp[[1]][[j]]:(tmp[[1]][[j+1]])),
+                          list(tmp[[1]][[j]]: (tmp[[1]][[j]]+16))))
+    }
+}
+
+#filters out long index pairs for "oregon" problem
+#however it still passes the shorter incorrect pairs 
+slice = slice[lapply(slice, length) < 150 ]
+```
+
+```{r}
+#initializes dataframe to strore bill info
+av.17.19 = data.frame(state = "", name = "", text = "", year = "", status = "", stringsAsFactors = FALSE)
+
+#loop restructures data into tidy format
+for (i in 1:length(slice)){
+  tmp = yolo.df[slice[[i]],]
+  sum.indx = which(str_detect(tmp, "summary"))
+  hist.indx = which(str_detect(tmp, "history"))
+  av.17.19[i,1] = abbr2state(substr(tmp[[1]], 0, 2))
+  av.17.19[i,2] = tmp[[1]]
+  av.17.19[i,3] = ifelse(sum.indx+1 == hist.indx, 
+       substr(tmp[[which(str_detect(tmp, "summary"))]], 10, 400),  
+       paste(substr(tmp[[which(str_detect(tmp, "summary"))]], 10, 400), tmp[[hist.indx-1]]))
+  av.17.19[i,4] = tmp[[2]]
+  
+  if (str_detect(tmp[[4]], "enacted") == TRUE){
+    av.17.19[i,5] = "Enacted"
+  } else if (str_detect(tmp[[4]], "failed") == TRUE){
+    av.17.19[i,5] = "Failed"
+  } else if (str_detect(tmp[[4]], "pending") == TRUE){
+    av.17.19[i,5] = "Pending"
+  } else {
+    av.17.19[i,5] = "N/A"
+  }
+}
+#this code needs an if then statement to identify status of the bill.
+```
+
+```{r}
+#changing variable data types
+av.17.19$state = as.factor(av.17.19$state)
+av.17.19$year = as.integer(av.17.19$year)
+av.17.19$status = as.factor(av.17.19$status)
+```
+
+Billbody final form.
+```{r}
+billbody = rbind.data.frame(av.12.16, av.17.19)
+billbody$name = as.factor(paste(billbody$name, billbody$year) )
+```
+
+```{r}
+#function which takes commonly grouped words and puts them into a single word
+grouped.werds = function(doc) {
+  doc = gsub("autonomous motor vehicles", "av", doc)
+  doc = gsub("autonomous motor vehicle", "av", doc)
+  doc = gsub("autonomous vehicles", "av", doc)
+  doc = gsub("autonomous vehicle", "av", doc)
+  doc = gsub("automated vehicles", "av", doc)
+  doc = gsub("automated vehicle", "av", doc)
+  doc = gsub("autonomous cars", "av", doc)
+  doc = gsub("autonomous car", "av", doc)
+  doc = gsub("automated and connected vehicles", "av", doc)
+  doc = gsub("automated and connected vehicle", "av", doc)
+  doc = gsub("connected vehicles", "av", doc)
+  doc = gsub("connected vehicle", "av", doc)
+  doc = gsub("automated motor vehicles", "av", doc)
+  doc = gsub("automated motor vehicle", "av", doc)
+  doc = gsub("selfdriving motor vehicles", "av", doc)
+  doc = gsub("selfdriving motor vehicle", "av", doc)
+  doc = gsub("selfdriving vehicles", "av", doc)
+  doc = gsub("selfdriving vehicle", "av", doc)
+  doc = gsub("driverless motor vehicles", "av", doc)
+  doc = gsub("driverless motor vehicle", "av", doc)
+  doc = gsub("driverless vehicles", "av", doc)
+  doc = gsub("driverless vehicle", "av", doc)
+  doc = gsub("unmanned motor vehicles", "av", doc)
+  doc = gsub("unmanned motor vehicle", "av", doc)
+  doc = gsub("avs", "av", doc)
+  
+  #by authorities
+  doc = gsub("vehicle services division", "vehicleservicesdivision", doc)
+  doc = gsub("vehicle services department", "vehicleservicesdepartment", doc)
+  doc = gsub("vehicle services", "motorvehiclelicensingsystem", doc)
+  doc = gsub("tax commission", "taxcommission", doc)
+  doc = gsub("registry of motor vehicles", "registryofmotorvehicles", doc)
+  doc = gsub("office of motor vehicles", "officeofmotorvehicles", doc)
+  doc = gsub("motor vehicle licensing system", "motorvehiclelicensingsystem", doc)
+  doc = gsub("motor vehicle licensing division", "motorvehiclelicensingdivision", doc)
+  doc = gsub("motor vehicle division", "motorvehicledivision", doc)
+  doc = gsub("motor vehicle commission", "motorvehiclecommission", doc)
+  doc = gsub("motor vehicle bureau", "motorvehiclebureau", doc)
+  doc = gsub("motor vehicle administration", "motorvehicleadministration", doc)
+  doc = gsub("driver services program", "driverservicesprogram", doc)
+  doc = gsub("driver services directorate", "driverservicesdirectorate", doc)
+  doc = gsub("driver services department", "driverservicesdepartment", doc)
+  doc = gsub("driver license services", "driverlicenseservices", doc)
+  doc = gsub("driver license division", "driverlicensedivision", doc)
+  doc = gsub("driver and vehicle services", "driverandvehicleservices", doc)
+  doc = gsub("driver and motor vehicle services", "driverandmotorvehicleservices", doc)
+  doc = gsub("division of vehicles", "divisionofvehicles", doc)
+  doc = gsub("division of motor vehicles", "divisionofmotorvehicles", doc)
+  doc = gsub("division of driver licensing", "divisionofdriverlicensing", doc)
+  doc = gsub("department of state", "departmentofstate", doc)
+  doc = gsub("department of revenue and taxation", "departmentofrevenueandtaxation", doc)
+  doc = gsub("department of revenue", "departmentofrevenue", doc)
+  doc = gsub("department of licensing", "departmentoflicensing", doc)
+  doc = gsub("department of driver services", "departmentofdriverservices", doc)
+  doc = gsub("bureau of motor vehicles", "bureauofmotorvehicles", doc)
+  doc = gsub("department of vehicle", "dmv", doc)
+  doc = gsub("department of highway safety and motor vehicles", "dmv", doc)
+  
+  doc = gsub("department of transportation", "dot", doc)
+  doc = gsub("transportation department", "dot", doc)
+  doc = gsub("transit authority", " ", doc)
+  doc = gsub("department of safety", "dps", doc)
+  doc = gsub("department of public safety", "dps", doc)
+  doc = gsub("task force", "taskforce", doc)
+  doc = gsub("highway patrol", "policeofficer", doc)
+  doc = gsub("police officer", "policeofficer", doc)
+  doc = gsub("peace officer", "policeofficer", doc)
+  doc = gsub("law officer", "policeofficer", doc)
+
+  #by license
+  doc = gsub("valid drivers license", "driverlicense", doc)
+  doc = gsub("valid driver license", "driverlicense", doc)
+  doc = gsub("drivers licenses", "driverlicense", doc)
+  doc = gsub("drivers license", "driverlicense", doc)
+  doc = gsub("driver licenses", "driverlicense", doc)
+  doc = gsub("driver license", "driverlicense", doc)
+  doc = gsub("licenses", "driverlicense", doc)
+  doc = gsub("license", "driverlicense", doc)
+  
+  doc = gsub("micro transit", "microtransit", doc)
+  doc = gsub("mobility-as-a-service", "maas", doc)
+  doc = gsub("mobility as a service", "maas", doc)
+  doc = gsub("multi modal", "multimodal", doc)
+  doc = gsub("multi-modal", "multimodal", doc)
+  doc = gsub("traffic control", "trafficcontrol", doc)
+  
+  #by technology 
+  doc = gsub("motor vehicles", "vehicle", doc)
+  doc = gsub("motor vehicle", "vehicle", doc)
+  
+  doc = gsub("pilot project", "pilotproject", doc)
+  doc = gsub("platooning", "platoon", doc)
+  doc = gsub("platoons", "platoon", doc)
+  
+  doc = gsub("automated driving system", "ads", doc)
+  doc = gsub("automated driving systems", "ads", doc)
+  
+  doc = gsub("automated braking system", "abs", doc)
+  doc = gsub("automated braking systems", "abs", doc)
+  
+  doc = gsub("automated technology", "avtech", doc)
+  doc = gsub("autonomous technology", "avtech", doc)
+  doc = gsub("automated system", "avtech", doc)
+  doc = gsub("autonomous system", "avtech", doc)
+  doc = gsub("communication devices", "communicationdevices", doc)
+
+  return(doc)
+}
+```
+
+```{r}
+remove.werds = function(doc) {
+  doc = gsub("relates", "", doc)
+  doc = gsub("defines", "", doc)
+  doc = gsub("creates", "", doc)
+  return(doc)
+}
+```
+
+```{r}
+#more preprocessing of the text
+billbody$text = billbody$text %>%
+  str_replace_all("[[:punct:]]", "") %>% str_replace_all("[[:digit:]]", "")
+```
+
+```{r}
+billbody$text = grouped.werds(billbody$text)
+billbody$text = remove.werds(billbody$text)
+```
+
+```{r}
+tmp = which(billbody$state == "Mayland")
+billbody$state[tmp] = "Maryland"
+```
+
+
+```{r}
+billbody.filtered = billbody %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words)
+
+billbody.filtered$word = singularize(billbody.filtered$word)
+```
+
+```{r}
+#making a DTM by hand
+billbody.filtered.DTM = billbody.filtered %>%
+  group_by(name) %>%
+  count() %>%
+  ungroup()
+```
+
+**ANALYSIS**
+General Descriptives
+Cummlative Totals (all)
+```{r}
+#cummlative description of all proposed bills by state
+tmp.1 = billbody %>%
+  select(year) %>%
+  group_by(year) %>%
+  count() %>% ungroup() %>%
+  mutate(cum.sum = cumsum(freq)) 
+
+tmp.2 = billbody %>%
+  filter(status == "Enacted") %>%
+  select(year) %>%
+  group_by(year) %>%
+  count() %>% ungroup() %>%
+  mutate(cum.sum = cumsum(freq)) 
+
+ggplot() +
+    geom_point(data = tmp.1, aes(year, cum.sum), color = "blue") +
+    geom_line(data = tmp.1,aes(year, cum.sum), color = "blue") +
+    geom_area(data = tmp.1,aes(year, cum.sum),fill = "blue", alpha = .2) +
+    geom_text(data = tmp.1,aes(year, cum.sum,label = cum.sum),  nudge_y = 25) +
+    geom_point(data = tmp.2, aes(year, cum.sum), color = "dark red") +
+    geom_line(data = tmp.2,aes(year, cum.sum), color = "dark red") +
+    geom_area(data = tmp.2,aes(year, cum.sum),fill = "red", alpha = .5) +
+    labs(x = "Year", y = "Count", title = "Number of proposed AV bills (cummulative)", caption = "Data courtesy of National Conference of State Legislatures", subtitle = "Proposed (Blue), Enacted (Red)" ) +
+    theme_classic()
+```
+
+```{r}
+#cummlative description of all proposed bills by state
+tmp = billbody %>%
+  select(state, year) %>%
+  group_by(state, year) %>%
+  count() %>% ungroup() 
+
+tmp$cum.sum = as.numeric(unlist(tapply(tmp$freq, tmp$state, cumsum)))
+
+tmp.3 = aggregate(tmp$freq, by = list(tmp$state), FUN = sum)  %>%
+  arrange(desc(x)) %>%
+  top_n(10)
+
+ggplot(tmp) +
+  geom_line(aes(year, cum.sum, color = state)) +
+  geom_point(aes(year, cum.sum, color = state)) + 
+  theme_classic()
+```
+
+Cummlative Totals (enacted)
+```{r}
+#summlative description of all enacted bills by state
+tmp.1 = billbody %>%
+  filter(status == "Enacted") %>%
+  select(state, year) %>%
+  group_by(state, year) %>%
+  count() %>% 
+  ungroup() 
+
+tmp.1$cum.sum = as.numeric(unlist(tapply(tmp.1$freq, tmp.1$state, cumsum)))
+
+tmp.2 = aggregate(tmp.1$cum.sum, by = list(tmp.1$state), max) %>%
+  arrange(desc(x)) %>%
+  top_n(10) %>%
+  set_colnames(c("state", "Count"))
+
+ggplot(right_join(tmp.1, tmp.2))+
+  geom_line(aes(year, cum.sum, color = state, linetype = state)) +
+  geom_point(aes(year, cum.sum, color = state)) + 
+  ylim(0,12) +
+  labs(x = "Year", y = "Count", title = "Top 10 active state legislatures enacting policies", caption = "Data courtesy of National Conference of State Legislatures", color = "State", linetype = "State") +
+    theme_classic()
+```
+
+```{r}
+cbind.data.frame(tmp.3, tmp.2) %>%
+  set_colnames(c("Proposed", "Count", "Enacted", "Count")) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+
+```
+
+Top 5 words for all states relative to word count
+```{r,  fig.width = 6}
+tmp.1 = billbody.filtered %>% 
+  filter(state == "California") %>%
+  select(state, word) %>%
+  group_by(state) %>%
+  count() %>% 
+  ungroup() %>%
+  filter(word != "av" & word != "vehicle" & word != "matter" & word != "related" & word != "definition" & word != "clas" ) %>%
+  group_by(state) %>%
+  filter(freq >2) %>%
+  top_n(10) %>% 
+  ungroup()
+
+tmp.2 = billbody.filtered %>% 
+  filter(state == "Georgia") %>%
+  select(state, word) %>%
+  group_by(state) %>%
+  count() %>% 
+  ungroup() %>%
+  filter(word != "av" & word != "vehicle" & word != "matter" & word != "related" & word != "definition" & word != "clas" ) %>%
+  group_by(state) %>%
+  filter(freq >2) %>%
+  top_n(10) %>% 
+  ungroup()
+
+tmp.3 = billbody.filtered %>% 
+  filter(state == "New Jersey") %>%
+  select(state, word) %>%
+  group_by(state) %>%
+  count() %>% 
+  ungroup() %>%
+  filter(word != "av" & word != "vehicle" & word != "matter" & word != "related" & word != "establish" & word != "existing") %>%
+  group_by(state) %>%
+  filter(freq >2) %>%
+  top_n(10) %>% 
+  ungroup()
+
+ggplot(tmp.1) +
+  geom_bar(aes(x = reorder(word, freq), y = freq), stat="identity", fill = "light blue", color = "black") +
+  labs(y = "Occurance Count", x = "", title = "California") +
+  theme_classic() +
+  coord_flip()
+
+ggplot(tmp.2) +
+  geom_bar(aes(x = reorder(word, freq), y = freq), stat="identity", fill = "light blue", color = "black") +
+  labs(y = "Occurance Count", x = "", title = "Georgia") +
+  theme_classic() +
+  coord_flip()
+
+ggplot(tmp.3) +
+  geom_bar(aes(x = reorder(word, freq), y = freq), stat="identity", fill = "light blue", color = "black") +
+  labs(y = "Occurance Count", x = "", title = "New Jersey") +
+  theme_classic() +
+  coord_flip()
+
+```
+
+Topic Analysis 
+```{r}
+clr.8 = c( "#78c679", "#edf8b1", "#c7e9b4", "#7fcdbb","#41b6c4", "#1d91c0", "#225ea8","#0c2c84")
+
+topics = read_xlsx("./Data/TTP220_Project.xlsx", sheet = 1, col_names = TRUE)
+colnames(topics)
+```
+
+```{r}
+#checks for hand-made topics 
+totals = billbody.filtered.DTM %>%
+  mutate(testing = freq*ifelse((billbody.filtered.DTM$word %in% topics$testing),1,0)) %>%
+  mutate(safety = freq*ifelse((billbody.filtered.DTM$word %in% topics$safety),1,0)) %>%
+  mutate(operation = freq*ifelse((billbody.filtered.DTM$word %in% topics$operation),1,0)) %>%
+  mutate(authorities = freq*ifelse((billbody.filtered.DTM$word %in% topics$authorities),1,0)) %>%
+  mutate(permission = freq*ifelse((billbody.filtered.DTM$word %in% topics$permission),1,0)) %>%
+  mutate(infrastructure = freq*ifelse((billbody.filtered.DTM$word %in% topics$infrastructure),1,0)) %>%
+  mutate(social = freq*ifelse((billbody.filtered.DTM$word %in% topics$social),1,0)) %>%
+  mutate(financial = freq*ifelse((billbody.filtered.DTM$word %in% topics$financial),1,0)) 
+```
+
+```{r}
+#sums topic totals per bill
+totals = aggregate(totals[,c(7:length(totals))], by = list(totals$name), sum)
+
+colnames(totals)[1] = "name"
+totals = totals %>% 
+  left_join(billbody[,-3] )
+```
+
+```{r}
+#what are states concernded with?
+tmp = totals 
+
+#by status
+aggregate(tmp[,c(2:9)], by = list(tmp$status), FUN = sum)
+
+#by year
+tmp = aggregate(tmp[,c(2:9)], by = list(tmp$year), FUN = sum) 
+
+for (i in 1:nrow(tmp)){
+  tmp[i,-1] = round(tmp[i,-1] / (billbody %>% filter(year == tmp[i,1]) %>% nrow()), 5)
+}
+
+tmp %>%
+  gather("Topic", "Counts", 2:9) %>%
+  ggplot() +
+    geom_line(aes(Group.1,Counts, color = Topic), size = 1) +
+    geom_point(aes(Group.1,Counts, color = Topic)) +
+    scale_color_manual(values = (clr.8)) +
+    theme_classic() +
+    labs(title = "What are states concerned with?", x = "Years", y = "Counts (adjusted)")
+```
+
+```{r}
+#what are states concernded with?
+#Corrected for number of bills per year 
+tmp.1 = totals 
+
+#by status
+# aggregate(tmp[,c(2:9)], by = list(tmp$status), FUN = sum)
+
+#by year
+tmp.1 = aggregate(tmp.1[,c(2:9)], by = list(tmp.1$year), FUN = sum) 
+
+tmp.1 =  tmp.1 %>%
+  mutate(ttl = billbody %>% 
+  select(year) %>%
+  group_by(year) %>%
+  count() %>%
+  select(freq)) 
+
+tmp.1 = tmp.1 %>%
+  mutate(cum.sum = cumsum(tmp.1$ttl$freq)) %>%
+  mutate(cum.sum.adj = cum.sum/(max(cum.sum)/2))
+
+for (i in 1:length(tmp.1[,c(2:9)])){
+  tmp.1[,(i+1)] = tmp.1[,(i+1)]/tmp.1$ttl$freq
+}
+
+tmp.1 %>%
+  gather("Topic", "Counts", 2:9) %>%
+  ggplot() +
+    geom_line(aes(Group.1,Counts, color = Topic), size = 1.25) +
+    geom_point(aes(Group.1,Counts, color = Topic)) +
+    geom_area(data = tmp.1, aes(Group.1, cum.sum.adj), alpha = .05) +
+    geom_line(data = tmp.1, aes(Group.1, cum.sum.adj), alpha = .3) +
+    theme_classic() +
+    labs(title = "What are states priorities?", x = "Years", y = "Counts per proposed document")
+```
+
+Posiitios of AUuthorit
+```{r}
+tmp = billbody.filtered.DTM[which(billbody.filtered.DTM$word %in% topics$authorities),] 
+aggregate(tmp$freq, by = list(tmp$state, tmp$word), FUN = sum) %>%
+  arrange(Group.1, Group.2) %>%
+  group_by(Group.1, Group.2) %>%
+  count() %>%
+  ggplot() +
+    geom_bar(aes(x = reorder(Group.1, x), y = x, fill = Group.2), stat="identity", color = "black") +
+    scale_fill_manual(values = (clr.8)) +
+    labs(x = "Occurance Count", y = "States", fill = "Detected Refernces \n to Authority", title = "Who regulates AVs?") +
+    theme_classic() +
+    coord_flip()
+
+aggregate(tmp$freq, by = list(tmp$word), FUN = sum) %>%
+  arrange(desc(x)) %>%
+  ggplot() +
+    geom_bar(aes(x = reorder(Group.1, x), y = x), stat="identity", fill = clr.8[4], color = "black") +
+    labs(y = "Occurance Count", x = "", title = "Common references to authority") +
+    theme_classic() +
+    coord_flip()
+```
+
+```{r}
+tmp = billbody.filtered.DTM[which(billbody.filtered.DTM$word %in% c("dot", "dmv", "dps", "commision", "taskforce")),]
+
+aggregate(tmp$freq, by = list(tmp$state, tmp$word), FUN = sum) %>%
+  arrange(Group.1, Group.2) %>%
+  group_by(Group.1, Group.2) %>%
+  count() %>%
+  ggplot() +
+    geom_bar(aes(Group.1, weight = x, fill = Group.2)) +
+    scale_fill_manual(values = (clr.8)) +
+   theme_classic() +
+   coord_flip()
+```
+
+```{r}
+#what is florida and Califronia concerned with?
+tmp = totals %>%
+  filter(state == "Georgia" | state == "California" | state == "New Jersey")  
+
+#state totals
+aggregate(tmp[,c(2:9)], by = list(tmp$state), FUN = sum) %>%
+  set_colnames(c("",str_to_title(colnames(topics)))) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+
+#by status
+aggregate(tmp[,c(2:9)], by = list(tmp$state, tmp$status), FUN = sum) %>%
+  set_colnames(c("","",str_to_title(colnames(topics)))) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+
+#by year
+tmp = aggregate(tmp[,c(2:9)], by = list(tmp$state, tmp$year), FUN = sum) 
+
+tmp %>%
+  set_colnames(c("","",str_to_title(colnames(topics)))) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+
+tmp = tmp %>%
+  gather("Topic", "Counts", 3:10) %>% 
+   arrange(Topic, Group.1, Group.2)  
+  # group_by(Group.1, Topic) %>%
+  # mutate(cum.sum = cumsum(Counts)).1.1[]
+tmp.1 = tmp[(tmp$Group.1 == "California"),]
+tmp.1$cum.sum = as.numeric(unlist(tapply(tmp.1$Counts, tmp.1$Topic, cumsum)))
+
+tmp.2 = tmp[(tmp$Group.1 == "Georgia"),]
+tmp.2$cum.sum = as.numeric(unlist(tapply(tmp.2$Counts, tmp.2$Topic, cumsum)))
+
+tmp.3 = tmp[(tmp$Group.1 == "New Jersey"),]
+tmp.3$cum.sum = as.numeric(unlist(tapply(tmp.3$Counts, tmp.3$Topic, cumsum)))
+
+rbind(tmp.1, tmp.2, tmp.3) %>%
+  ggplot() +
+    geom_line(aes(Group.2,cum.sum, color = Topic)) +
+    geom_point(aes(Group.2,cum.sum, color = Topic)) +
+    facet_grid(cols = vars(Group.1)) +
+    theme_classic() +
+    labs(title = "What are states priorities?", x = "Years", y = "Cummlative Counts")
+```
+
+```{r}
+billbody.filtered.enacted = billbody.filtered %>%
+  filter(status == "Enacted")
+
+billbody.filtered.failed = billbody.filtered %>%
+  filter(status == "Failed")
+```
+
+```{r}
+#top 25 words total 
+billbody.filtered.enacted %>%
+  mutate(word = as.factor(word)) %>%
+  select(word) %>%
+  count() %>% 
+  arrange(desc(freq))%>%
+  head(25)
+
+billbody.filtered.failed %>%
+  mutate(word = as.factor(word)) %>%
+  select(word) %>%
+  count() %>% 
+  arrange(desc(freq))%>%
+  head(25)
+```
+
+```{r}
+#Actualy enacted legislation 
+billbody.filtered.enacted %>%
+  filter(word == c("dot", "dmv"))
+```
+
+88888888888888888888888888888888888
+#gives top 25 words in california
+billbody.filtered %>%
+  mutate(word = as.factor(word)) %>%
+  select(state, word) %>%
+  group_by(state) %>%
+  count() %>% ungroup() %>%
+  filter(state == "California") %>%
+  arrange(desc(freq)) %>%
+  head(10) #%>%
+  # ggplot() +
+  #   geom_bar(aes(as.factor(word), weight = freq)) 
+
+billbody.filtered %>%
+  filter(status == "enacted") %>%
+  mutate(word = as.factor(word)) %>%
+  select(state, word) %>%
+  group_by(state) %>%
+  count() %>% ungroup() %>%
+  filter(state == "California") %>%
+  arrange(desc(freq)) %>%
+  head(10) 
+
+billbody.filtered %>%
+  filter(status == "failed") %>%
+  mutate(word = as.factor(word)) %>%
+  select(state, word) %>%
+  group_by(state) %>%
+  count() %>% ungroup() %>%
+  filter(state == "California") %>%
+  arrange(desc(freq)) %>%
+  head(10)
+
+billbody.filtered %>%
+  filter(state == "California") %>%
+  filter(word == "testing")
+88888888888888888888888888888888888
+
+AutoVe_Intro_2012_leg
+
+
+av.2012 = readLines("./Data/AutoVe_Intro_2012_leg.txt") 
+av.2012 = tibble(text = av.2012)
+av.2012 = as.data.frame(av.2012)
+
+av.2013 = readLines("./Data/AutoVe_Intro_2013_leg.txt")
+av.2013 = tibble(text = av.2013)
+av.2013 = as.data.frame(av.2013)
+
+av.2014 = readLines("./Data/AutoVe_Intro_2014_leg.txt") 
+av.2014 = tibble(text = av.2014)
+av.2014 = as.data.frame(av.2014)
+
+av.2015 = readLines("./Data/AutoVe_Intro_2015_leg.txt") 
+av.2015 = tibble(text = av.2015)
+av.2015 = as.data.frame(av.2015)
+
+av.2016 = readLines("./Data/AutoVe_Intro_2016_leg.txt") 
+av.2016 = tibble(text = av.2016)
+av.2016 = as.data.frame(av.2016)
+
+
+#use below code to check for specific words
+billbody[which(str_detect(billbody$text, "wireless communications devices")),]
+
+#line below is a really powerful technique to see if a line of text contains any specicified input
+indx = which(str_detect(av.2015$text, paste(state.abb, collapse = '|')))
+av.2015[indx,]
+88888888888888888888888888888888888
+
+
+88888888888888888888888888888888888
+
+######trying to get to a document term matix here
+werrrds = paste(stop_words$word, collapse = '|')
+
+billbody 
+gsub(paste("the | of | to", collapse = '|'),"", billbody$text)
+gsub(werrrds,"", billbody$text)
+
+homie = billbody
+homie$text = gsub("the | of | to | in | this | or |on|an|be| a |as |and| for|defines|is|that|into","", homie$text)
+88888888888888888888888888888888888
+
+88888888888888888888888888888888888
+
+homie = homie %>%
+  select(name, text) %>%
+  corpus() %>%
+  dfm() %>%
+  LDA(k = 6, control = list(seed = 1234))
+
+tidy(homie, matrix = "beta") %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta) %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+88888888888888888888888888888888888
+
+
+88888888888888888888888888888888888
+
+#was trying to tokenize by sentence
+#makes it difficult to remove words from a sentence 
+#if i did this again i would :
+#keep punctuation 
+#split/tokenize on periods or orther snetence ending punctutation 
+#each row would have a state, year, name of bill, sentence number in bill varibales
+#then toeknize words
+
+
+billbody %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words)  %>%
+  nest(word) 
+
+jhhhh$text = as.character(jhhhh$data)
+jhhhh$text = unlist(jhhhh$text)
+
+jhhhh$text = paste(jhhhh$text, collapse=' ' )
+
+jhhhh$data
+?nest()
+
+billbody %>%
+  unnest_tokens(sentence, text, token = "sentences") %>%
+  anti_join(stop_words) 
+88888888888888888888888888888888888
+
+
+88888888888888888888888888888888888
+#sentiment analysis 
+billbody.filtered.DTM %>%
+  left_join(get_sentiments("bing")) %>%
+  arrange(name)
+
+#still havent figured out the correct way to do it
+
+loughran
+billbody.filtered %>%
+  distinct() %>%
+  merge(x = ., y = get_sentiments("bing"), by="word",all.x=TRUE) %>% 
+  arrange(year, state, name) 
+
+
+(billbody.filtered$word) %>%
+  unique() %>%
+  sort()
+88888888888888888888888888888888888
+
+
+
+
+
+
+
+
+
+
+
+
