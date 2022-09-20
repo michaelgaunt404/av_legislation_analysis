@@ -447,7 +447,11 @@ leg_text = recipe( ~ bill_name + text, data = legislation_df_sample) %>%
 
 data_leg = leg_text %>%  
   prep() %>%  
-  juice() 
+  juice()
+
+pca_leg = leg_text %>%  
+  prep() %>%  
+  juice()
 
 pca_leg = prep(leg_text)
 pca_rec
