@@ -54,7 +54,7 @@ library(lubridate)
 library(tidytext)  #text mining and manipulation package
 library(textrecipes) #tidymodels recipes for text analysis
 # library(textfeatures)
-# library(textclean)
+library(textclean) #Tools to clean and process text, mainly use to remove contractions
 library(tidytext)
 library(textstem)
 
@@ -64,6 +64,9 @@ library(factoextra)
 <!--#source helpers/utilities===================================================
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #content in this section should be removed if in production - ok for dev -->
+```{r}
+source(here("code/function_text_manip.r"))
+```
 
 <!--#source data================================================================
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -71,25 +74,10 @@ library(factoextra)
 #area to upload data with and to perform initial munging
 #please add test data here so that others may use/unit test these scripts -->
 
+Loads in most recent data and samples it to make development faster.
 ```{r}
-# bill_data = readRDS(here::here(
-#   "data/scraped_legislation_2021-06-18.rds")
-# )
-# #don't have to run this until the data is scraped again
-# # big_list_node_text = readRDS(here::here("data/big_list_node_text.rds"))
-# #
-# # big_list_node_td = readRDS(here::here("data/big_list_node_td.rds"))
-# #
-# 
-# # legislation_df = tibble(state = bill_data$state[-c(497:498)],
-# #        bill_name = bill_data$bill_name[-c(497:498)],
-# #        text = unlist(big_list_node_text))
-# # #
-# # legislation_df %>%
-# #   saveRDS(str_glue("./data/legislation_df_{Sys.Date()}.rds"))
-
 legislation_df = 
-  here("data/legislation_df_2021-06-24.rds") %>% 
+  here("data/legsilation_df_2021-06-24.rds") %>% 
   readRDS()
 
 legislation_df_sample = legislation_df %>%  
@@ -100,50 +88,36 @@ legislation_df_sample = legislation_df %>%
 
 ## Intrduction
 
-
 <!--#SECTION NAME===============================================================
 #use this header to make demarcations/section in code [delete this line]
 #short description -->
 
 ## Basic Data Exploration 
+
+Preping data some more... good place to copy and build analyses off of. 
 ```{r}
+token_df = legislation_df_sample %>% 
+  clean_stopwords() %>%  #removes stop words, custom function
+  unnest_tokens(word, text) 
 
-clean_stopwords = function(data){
-  # currently requires sting column to be called "text"
-  data %>% 
-    unnest_tokens(word, text) %>%
-    anti_join(stop_words) %>%
-    nest(data = word) %>%  
-    mutate(text = map(data, unlist),
-           text = map_chr(text, paste, collapse = " "))
-}
+token_df_agg = token_df %>% 
+  count(state, bill_name, word, sort = F) 
+```
 
-unnest_tokens(word, text) %>%
-  count(state, bill_name, word, sort = TRUE) 
-
-tmp = legislation_df_sample %>% 
-  clean_stopwords() %>%  
-  unnest_tokens(word, text) %>%
-  count(state, bill_name, word, sort = F) %>%  
+Plotting word count info per state bill - not very important or informative. 
+```{r}
+token_df_agg %>%  
   group_by(state, bill_name) %>%  
-  mutate(number_words = sum(n), 
+  summarize(number_words = sum(n), 
          number_words_unique = n(), 
-         unique_word_ratio = number_words_unique/number_words) %>%  
-  filter()
-
-tmp %>%  
-  select(!c(word, n)) %>%  
-  unique() %>%  
+         unique_word_ratio = number_words_unique/number_words) %>% 
   ggplot() + 
-  geom_col(aes(bill_name, unique_word_ratio, fill = (number_words)))
+  geom_col(aes(bill_name, unique_word_ratio, fill = (number_words))) + 
+  coord_flip()
 ```
 
-I tried using the textfeatures package but it didn't really produce anything interesting. Potntetially better for something that doesn;t use legalalize. 
-```{r}
-legislation_df_sample %>%  
-  textfeatures::textfeatures() %>%  
-  autoplot()
-```
+
+
 
 
 ```{r}
@@ -159,7 +133,7 @@ recipe(~text, data = short_data) %>%
   prep() %>%  
   juice()
 
-leg_text <- recipe( ~ bill_name + text, data = tmp) %>%
+leg_text <- recipe( ~ bill_name + text, data = token_df_agg) %>%
   step_tokenize(text, engine = "spacyr") %>%
   step_lemma(text) %>%
   step_tf(text)  
@@ -190,33 +164,187 @@ leg_text %>%
 ```
 
 
+## Modeling 
+
+### Analysis Data 
+
+This is the data that we will want to use for the analysis. 
+
+The data is processed using the TidyModels _recipes_ framework that defines a data preprocessing recipe for us. We do this to explicitly define the data preprocessing so that it is consistent and meaningful. 
+
+We first define the recipe, then we execute the recipe (data processing). Step through each line of code and then process it (via prep and juice functions).
+
+#### Base Pre-processing Recipe Data 
 ```{r}
-leg_text <- recipe( ~ bill_name + text, data = legislation_df_sample) %>%
-  step_mutate(text = replace_contraction(text) %>%
-                lemmatize_strings()) %>% 
+#defining recipe
+#this recipe returns cleaned DF with word sequence intact 
+rec_clean_text = recipe( ~ state + bill_name + text, data = legislation_df_sample) %>%
+  step_mutate(text = replace_contraction(text)) %>%
+  step_mutate(text = lemmatize_strings(text)) %>%
+  # step_stem(text) %>% #i dont like the results of this, may change
   step_tokenize(text,
                 token = "words",
-                options = list(lowercase = TRUE,
-                               strip_punct = TRUE,
-                               stopwords = stop_words$word,
-                               strip_numeric = TRUE)) %>%
-  step_tf(text) %>% 
-  step_nzv(all_predictors())
+                options = list(lowercase = TRUE
+                               ,strip_punct = TRUE
+                               ,stopwords = stop_words$word
+                               ,strip_numeric = TRUE
+                               )
+                )  #this step maintains word sequence
+```
 
-data_leg = leg_text %>%  
+#### Pairwise Data 
+```{r}
+data_token_list = rec_clean_text %>%  
   prep() %>%  
-  juice() %>%  
-  filter(!duplicated(bill_name)) %>% 
-  column_to_rownames(var = "bill_name")
+  juice()
+
+data_token_list_exp = data_token_list %>% 
+  group_by(state, bill_name) %>% 
+  mutate(text = map(text, unlist),
+         text = map_chr(text, paste, collapse = " "))
+
+data_token_list_exp_token = data_token_list_exp %>%  
+  unnest_tokens(word, text)
+```
+
+### Normal Data and Recipe
+```{r}
+#abstract structure
+rec_tf = rec_clean_text = recipe( ~ state + bill_name + text, data = legislation_df_sample) %>%
+  step_mutate(text = replace_contraction(text)) %>%
+  step_mutate(text = lemmatize_strings(text)) %>%
+  # step_stem(text) %>% #i dont like the results of this, may change
+  step_tokenize(text,
+                token = "words",
+                options = list(lowercase = TRUE
+                               ,strip_punct = TRUE
+                               ,stopwords = stop_words$word
+                               ,strip_numeric = TRUE
+                               )
+                ) %>% 
+  step_tf(text) #this step removes word sequence
+# %>% step_nzv(all_predictors()) #this may remove a word that is in a bill many times but in no others, remove for now
   
+data_rec_tf = rec_tf %>%  
+  prep() %>%  
+  juice() %>% 
+  filter(!duplicated(bill_name))
+
+data_rec_tf_long = data_rec_tf %>% 
+  pivot_longer(cols = starts_with("tf_text")
+                 ,names_to = "text"
+                 ,values_to = "count") %>%  
+  mutate(text = str_remove_all(text, "tf_text_"))
+
+
+data_rec_tf_long_state = data_rec_tf_long %>%  
+  group_by(state, text) %>%  
+  summarise(count = sum(count), .groups = "drop")
+```
+
+### Pairwise Data Analysis
+
+This section looks to see if bigrams are meaningful or not. The idea behind this section was to determine if bigrams or n-grams should be analyzed as a singular, collapsed word/idea rather than separate words. 
+
+I do not believe this section works as intended, I'd effectively was trying to see if a word should be 
+
+```{r}
+pwc_state = data_token_list_exp_token %>%  
+  pairwise_cor(word, state, sort = TRUE)
+```
+
+```{r}
+pwc_state_all = pwc_state %>%  
+  filter(abs(correlation) > .8, 
+         abs(correlation) < .99)
+
+pwc_state_all_graph = pwc_state_all %>%  
+  graph_from_data_frame()
+
+ggraph(pwc_state_all_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = correlation), show.legend = FALSE) +
+  geom_node_point(color = "lightblue", size = ) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1, repel = TRUE)
+```
+
+
+```{r}
+pwc_state_safety = pwc_state %>%  
+  filter(item1 == "safety" | item2 == "safety") %>%  
+  filter(abs(correlation) > .5)
+
+pwc_state_safety %>%  
+  ggplot()+ 
+  geom_histogram(aes(correlation))
+
+pwc_state_safety_graph = pwc_state_safety %>%  
+  graph_from_data_frame()
+
+ggraph(pw_state_safety_graph, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+```
+
+
+### Log Odds Analysis
+
+Need to figure out a way to structure so that running multiple analysis is easier. Want to run this with more bigrams but it is hard to do so given current data strucutre. 
+
+```{r}
+data_rec_tf_long %>%  
+    
+wlo_state = data_rec_tf_long_state %>%  
+  filter(count != 0) %>% 
+  bind_log_odds(state, text, count) %>% 
+  arrange(-log_odds_weighted) 
+ 
+wlo_state %>% 
+filter(text == "fleet")
+ 
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
 data_leg %>% 
-    pivot_longer(cols = starts_with("tf_text")) %>%  
-  arrange(bill_name, -value) %>% 
-  group_by(bill_name) %>% 
+    pivot_longer(cols = starts_with("tf_text")
+                 ,names_to = "ngrams"
+                 ,values_to = "count") %>%  
+  arrange(state, -count) %>% 
+  group_by(state) %>% 
   top_n(10) %>%  
-  mutate(bill_name = fct_infreq(bill_name)) %>% 
+  mutate(ngrams = fct_infreq(ngrams)) %>% 
   ggplot() + 
-  geom_tile(aes(bill_name, name, fill = value))
+  geom_col(aes(ngrams, count)) + 
+  facet_wrap(vars(state), scales = "free") + 
+  coord_flip()
+  geom_tile(aes(state , name, fill = value))
 
 data_leg %>%  
   filter(!duplicated(bill_name)) %>% 
