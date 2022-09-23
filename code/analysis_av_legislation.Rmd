@@ -59,6 +59,11 @@ library(tidytext)
 library(textstem)
 
 library(factoextra)
+library(widyr)
+library(tidylo)
+library(igraph)
+library(ggraph)
+
 ```
 
 <!--#source helpers/utilities===================================================
@@ -121,46 +126,46 @@ token_df_agg %>%
 
 
 ```{r}
-short_data <- data.frame(text = c(
-  "class classes a classless shorter classy classic,",
-  "With many cats and ladies lady"
-))
-
-recipe(~text, data = short_data) %>%
-  step_tokenize(text, engine = "spacyr") %>%
-  step_lemma(text) %>%
-  step_tf(text) %>%  
-  prep() %>%  
-  juice()
-
-leg_text <- recipe( ~ bill_name + text, data = token_df_agg) %>%
-  step_tokenize(text, engine = "spacyr") %>%
-  step_lemma(text) %>%
-  step_tf(text)  
-
-leg_text_juiced = leg_text %>%  
-  prep() %>%  
-  juice()
-
-leg_text_juiced %>%  
-  pivot_longer(cols = starts_with("tf_text")) %>%  
-  arrange(bill_name, -value) %>% 
-  group_by(bill_name) %>% 
-  top_n(10) %>%  
-  mutate(bill_name = fct_infreq(bill_name)) %>% 
-  ggplot() + 
-  geom_col(aes(name, value)) + 
-  facet_wrap(vars(bill_name), scales = "free") +
-  coord_flip() 
-
-
-leg_text %>%  
-  prep() %>%  
-  juice() %>% 
-  colnames()  %>% 
-  data.frame(yolo = .) %>% 
-  sample_n(200) %>%  
-  sort(yolo)
+# short_data <- data.frame(text = c(
+#   "class classes a classless shorter classy classic,",
+#   "With many cats and ladies lady"
+# ))
+# 
+# recipe(~text, data = short_data) %>%
+#   step_tokenize(text, engine = "spacyr") %>%
+#   step_lemma(text) %>%
+#   step_tf(text) %>%  
+#   prep() %>%  
+#   juice()
+# 
+# leg_text <- recipe( ~ bill_name + text, data = token_df_agg) %>%
+#   step_tokenize(text, engine = "spacyr") %>%
+#   step_lemma(text) %>%
+#   step_tf(text)  
+# 
+# leg_text_juiced = leg_text %>%  
+#   prep() %>%  
+#   juice()
+# 
+# leg_text_juiced %>%  
+#   pivot_longer(cols = starts_with("tf_text")) %>%  
+#   arrange(bill_name, -value) %>% 
+#   group_by(bill_name) %>% 
+#   top_n(10) %>%  
+#   mutate(bill_name = fct_infreq(bill_name)) %>% 
+#   ggplot() + 
+#   geom_col(aes(name, value)) + 
+#   facet_wrap(vars(bill_name), scales = "free") +
+#   coord_flip() 
+# 
+# 
+# leg_text %>%  
+#   prep() %>%  
+#   juice() %>% 
+#   colnames()  %>% 
+#   data.frame(yolo = .) %>% 
+#   sample_n(200) %>%  
+#   sort(yolo)
 ```
 
 
@@ -256,14 +261,14 @@ pwc_state = data_token_list_exp_token %>%
 ```{r}
 pwc_state_all = pwc_state %>%  
   filter(abs(correlation) > .8, 
-         abs(correlation) < .99)
+         abs(correlation) < .95)
 
 pwc_state_all_graph = pwc_state_all %>%  
   graph_from_data_frame()
 
 ggraph(pwc_state_all_graph, layout = "fr") +
   geom_edge_link(aes(edge_alpha = correlation), show.legend = FALSE) +
-  geom_node_point(color = "lightblue", size = ) +
+  # geom_node_point(color = "lightblue", size = ) +
   geom_node_text(aes(label = name), vjust = 1, hjust = 1, repel = TRUE)
 ```
 
@@ -289,20 +294,20 @@ ggraph(pw_state_safety_graph, layout = "fr") +
 
 ### Log Odds Analysis
 
-Need to figure out a way to structure so that running multiple analysis is easier. Want to run this with more bigrams but it is hard to do so given current data strucutre. 
+Need to figure out a way to structure so that running multiple analysis is easier. Want to run this with more bigrams but it is hard to do so given current data structure. 
 
 ```{r}
-data_rec_tf_long %>%  
-    
+
 wlo_state = data_rec_tf_long_state %>%  
   filter(count != 0) %>% 
   bind_log_odds(state, text, count) %>% 
   arrange(-log_odds_weighted) 
  
 wlo_state %>% 
-filter(text == "fleet")
- 
+  filter(text == "fleet")
 
+wlo_state %>% 
+  filter(state == "NC")
 ```
 
 
@@ -431,7 +436,7 @@ fviz_cluster(list(data = data_leg, cluster = sub_grp))
 
 # Adding PCA to Recipe
 ```{r}
-leg_text = recipe( ~ bill_name + text, data = legislation_df_sample) %>%
+leg_text = recipe( ~ state + text, data = legislation_df_sample) %>%
   step_mutate(text = replace_contraction(text) %>%
                 lemmatize_strings()) %>% 
   step_tokenize(text,
@@ -441,9 +446,9 @@ leg_text = recipe( ~ bill_name + text, data = legislation_df_sample) %>%
                                stopwords = stop_words$word,
                                strip_numeric = TRUE)) %>%
   step_tf(text) %>% 
-  step_nzv(starts_with("tf_")) %>% 
+  step_nzv(starts_with("tf_")) %>%
   step_normalize(starts_with("tf_")) %>% 
-  step_pca(starts_with("tf_"), threshold = .8)
+  step_pca(starts_with("tf_"), threshold = .75)
 
 data_leg = leg_text %>%  
   prep() %>%  
@@ -453,7 +458,7 @@ pca_leg = leg_text %>%
   prep() %>%  
   juice()
 
-pca_leg = prep(leg_text)
+
 pca_rec
 
 pca_prep %>% 
@@ -489,13 +494,17 @@ tidy(pca_leg, 6) %>%
     y = NULL, fill = "Positive?"
   )
 
+#this workflow down here works 
+#current issue of 
 
-sdev <- pca_leg$steps[[6]]$res$sdev
+pca_leg = prep(leg_text)
+
+sdev <- pca_leg$steps[[5]]$res$sdev
 
 percent_variation <- sdev^2 / sum(sdev^2)
 
 tibble(
-  component = unique(tidy(pca_leg, 6)$component),
+  component = unique(tidy(pca_leg, 5)$component),
   percent_var = percent_variation ## use cumsum() to find cumulative, if you prefer
 ) %>%  
   mutate(percent_var = cumsum(percent_var)) %>%
@@ -511,8 +520,21 @@ tibble(
 
 
 
+#probably want to remove words that they all have - probably want to remove words that barely any of them have 
+data_leg %>%  
+  mutate(across(starts_with("tf"), ~case_when(.x == 0~0, T~1))) %>%  
+  summarise(across(starts_with("tf"), ~sum(.x)/65)) %>%  
+  pivot_longer(cols = starts_with("tf")) %>%  
+  view()
 
 
+
+
+
+data_leg %>%  
+   pivot_longer(cols = starts_with("tf")) %>% 
+  ggplot() + 
+  geom_tile(aes(state, name, fill = log2(value)))
 
 
 
