@@ -20,6 +20,7 @@ remDr$open()
 appurl <- "https://www.ncsl.org/research/transportation/autonomous-vehicles-legislative-database.aspx"
 remDr$navigate(appurl)
 
+browser$findElement(using = "xpath", str_glue("//select[@id = 'years']/option[{.x}]"))$clickElement()
 
 scraped_raw_html =
   remDr$getPageSource()[[1]] %>%
