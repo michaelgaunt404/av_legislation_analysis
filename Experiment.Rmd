@@ -1,0 +1,466 @@
+---
+title: 'Sliced Comp: Predict NYC Airbnb listing prices'
+author: ''
+date: '2021-07-24'
+slug: sliced-comp-predict-nyc-airbnb-listing-prices
+categories: ["R", "Machine Learning"]
+tags: ["regression", "tidymodels"]
+description: Goal of this markdown is to predict Airbnb listings in NYC.
+image: ~
+math: ~
+license: ~
+hidden: no
+comments: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  cache = FALSE, cache.lazy = FALSE, autodep = TRUE, warning = FALSE, 
+  message = FALSE, echo = TRUE, dpi = 180,
+  fig.width = 8, fig.height = 5, echo = FALSE
+  )
+```
+
+<!--#general comments===========================================================
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# This is [[insert description here - what it does/solve]]
+#
+# By: mike gaunt, michael.gaunt@wsp.com
+#
+# README: [[insert brief readme here]]
+#-------- [[insert brief readme here]]
+#
+# *please use 80 character margins
+# *please go to https://pkgs.rstudio.com/flexdashboard/articles/layouts.html
+# to explore the different layouts available for the flexdashboard framework
+#
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ -->
+
+<!--#library set-up=============================================================
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#content in this section should be removed if in production - ok for dev -->
+This is the last analyis that I perfromed on this project. This document was supposed to be a blog post but I never finished it, I will leave comments in for explinations of what the code does
+
+## Loading Packages
+
+Here I load both the tidyverse and tidymodels packages. The former is a catchall package which installs the entire tidyverse suite of packages which provide functions for basic data manipulation, the latter is a also conveniently loads a number of machine learning packages which play nicely with tidyverse packages.  
+```{r include = TRUE}
+library(tidyverse) #all tidyverse packages
+library(tidymodels) #modeling framework and packages
+library(here) #helps with file paths
+library(data.table) 
+library(lubridate)
+library(tidytext)  #text mining and manipulation package
+library(textrecipes) #tidymodels recipes for text analysis
+# library(textfeatures)
+library(textclean) #Tools to clean and process text, mainly use to remove contractions
+library(tidytext)
+library(textstem)
+
+library(factoextra)
+library(widyr)
+library(tidylo)
+#install.packages("igraph", type="binary")
+library(igraph)
+install.packages("ggraph")
+library(ggraph)
+
+```
+
+<!--#source helpers/utilities===================================================
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#content in this section should be removed if in production - ok for dev -->
+```{r}
+source(here("code/function_text_manip.r"))
+```
+
+<!--#source data================================================================
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#content in this section should be removed if in production - ok for dev 
+#area to upload data with and to perform initial munging
+#please add test data here so that others may use/unit test these scripts -->
+
+Loads in most recent data and samples it to make development faster.
+```{r}
+legislation_df = 
+  here("data/legsilation_df_2021-06-24.rds") %>% 
+  readRDS()
+
+legislation_df_sample = legislation_df %>%  
+  sample_n(100) %>%  
+  filter(str_count(text)<10000)
+```
+
+
+## Intrduction
+
+<!--#SECTION NAME===============================================================
+#use this header to make demarcations/section in code [delete this line]
+#short description -->
+
+## Basic Data Exploration 
+
+Preping data some more... good place to copy and build analyses off of. 
+```{r}
+token_df = legislation_df_sample %>% 
+  clean_stopwords() %>%  #removes stop words, custom function
+  unnest_tokens(word, text) 
+
+token_df_agg = token_df %>% 
+  count(state, bill_name, word, sort = F) 
+```
+
+Plotting word count info per state bill - not very important or informative. 
+```{r}
+token_df_agg %>%  
+  group_by(state, bill_name) %>%  
+  summarize(number_words = sum(n), 
+         number_words_unique = n(), 
+         unique_word_ratio = number_words_unique/number_words) %>% 
+  ggplot() + 
+  geom_col(aes(bill_name, unique_word_ratio, fill = (number_words))) + 
+  coord_flip()
+```
+
+
+
+
+
+```{r}
+# short_data <- data.frame(text = c(
+#   "class classes a classless shorter classy classic,",
+#   "With many cats and ladies lady"
+# ))
+# 
+# recipe(~text, data = short_data) %>%
+#   step_tokenize(text, engine = "spacyr") %>%
+#   step_lemma(text) %>%
+#   step_tf(text) %>%  
+#   prep() %>%  
+#   juice()
+# 
+# leg_text <- recipe( ~ bill_name + text, data = token_df_agg) %>%
+#   step_tokenize(text, engine = "spacyr") %>%
+#   step_lemma(text) %>%
+#   step_tf(text)  
+# 
+# leg_text_juiced = leg_text %>%  
+#   prep() %>%  
+#   juice()
+# 
+# leg_text_juiced %>%  
+#   pivot_longer(cols = starts_with("tf_text")) %>%  
+#   arrange(bill_name, -value) %>% 
+#   group_by(bill_name) %>% 
+#   top_n(10) %>%  
+#   mutate(bill_name = fct_infreq(bill_name)) %>% 
+#   ggplot() + 
+#   geom_col(aes(name, value)) + 
+#   facet_wrap(vars(bill_name), scales = "free") +
+#   coord_flip() 
+# 
+# 
+# leg_text %>%  
+#   prep() %>%  
+#   juice() %>% 
+#   colnames()  %>% 
+#   data.frame(yolo = .) %>% 
+#   sample_n(200) %>%  
+#   sort(yolo)
+```
+
+
+## Modeling 
+
+### Analysis Data 
+
+This is the data that we will want to use for the analysis. 
+
+The data is processed using the TidyModels _recipes_ framework that defines a data preprocessing recipe for us. We do this to explicitly define the data preprocessing so that it is consistent and meaningful. 
+
+We first define the recipe, then we execute the recipe (data processing). Step through each line of code and then process it (via prep and juice functions).
+
+#### Base Pre-processing Recipe Data 
+```{r}
+#defining recipe
+#this recipe returns cleaned DF with word sequence intact 
+rec_clean_text = recipe( ~ state + bill_name + text, data = legislation_df_sample) %>%
+  step_mutate(text = replace_contraction(text)) %>%
+  step_mutate(text = lemmatize_strings(text)) %>%
+  # step_stem(text) %>% #i dont like the results of this, may change
+  step_tokenize(text,
+                token = "words",
+                options = list(lowercase = TRUE
+                               ,strip_punct = TRUE
+                               ,stopwords = stop_words$word
+                               ,strip_numeric = TRUE
+                               )
+                )  #this step maintains word sequence
+```
+
+#### Pairwise Data 
+```{r}
+data_token_list = rec_clean_text %>%  
+  prep() %>%  
+  juice()
+
+data_token_list_exp = data_token_list %>% 
+  group_by(state, bill_name) %>% 
+  mutate(text = map(text, unlist),
+         text = map_chr(text, paste, collapse = " "))
+
+data_token_list_exp_token = data_token_list_exp %>%  
+  unnest_tokens(word, text)
+```
+
+### Normal Data and Recipe
+```{r}
+#abstract structure
+rec_tf = rec_clean_text = recipe( ~ state + bill_name + text, data = legislation_df_sample) %>%
+  step_mutate(text = replace_contraction(text)) %>%
+  step_mutate(text = lemmatize_strings(text)) %>%
+  # step_stem(text) %>% #i dont like the results of this, may change
+  step_tokenize(text,
+                token = "words",
+                options = list(lowercase = TRUE
+                               ,strip_punct = TRUE
+                               ,stopwords = stop_words$word
+                               ,strip_numeric = TRUE
+                               )
+                ) %>% 
+  step_tf(text) #this step removes word sequence
+# %>% step_nzv(all_predictors()) #this may remove a word that is in a bill many times but in no others, remove for now
+  
+data_rec_tf = rec_tf %>%  
+  prep() %>%  
+  juice() %>% 
+  filter(!duplicated(bill_name))
+
+data_rec_tf_long = data_rec_tf %>% 
+  pivot_longer(cols = starts_with("tf_text")
+                 ,names_to = "text"
+                 ,values_to = "count") %>%  
+  mutate(text = str_remove_all(text, "tf_text_"))
+
+
+data_rec_tf_long_state = data_rec_tf_long %>%  
+  group_by(state, text) %>%  
+  summarise(count = sum(count), .groups = "drop")
+```
+
+### Pairwise Data Analysis
+
+This section looks to see if bigrams are meaningful or not. The idea behind this section was to determine if bigrams or n-grams should be analyzed as a singular, collapsed word/idea rather than separate words. 
+
+I do not believe this section works as intended, I'd effectively was trying to see if a word should be 
+
+```{r}
+pwc_state = data_token_list_exp_token %>%  
+  pairwise_cor(word, state, sort = TRUE)
+```
+
+```{r}
+pwc_state_all = pwc_state %>%  
+  filter(abs(correlation) > .8, 
+         abs(correlation) < .95)
+
+pwc_state_all_graph = pwc_state_all %>%  
+  graph_from_data_frame()
+
+ggraph(pwc_state_all_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = correlation), show.legend = FALSE) +
+  # geom_node_point(color = "lightblue", size = ) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1, repel = TRUE)
+```
+
+
+```{r}
+pwc_state_safety = pwc_state %>%  
+  filter(item1 == "safety" | item2 == "safety") %>%  
+  filter(abs(correlation) > .5)
+
+pwc_state_safety %>%  
+  ggplot()+ 
+  geom_histogram(aes(correlation))
+
+pwc_state_safety_graph = pwc_state_safety %>%  
+  graph_from_data_frame()
+
+ggraph(pwc_state_safety_graph, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+```
+
+
+### Log Odds Analysis
+
+Need to figure out a way to structure so that running multiple analysis is easier. Want to run this with more bigrams but it is hard to do so given current data structure. 
+
+```{r}
+
+wlo_state = data_rec_tf_long_state %>%  
+  filter(count != 0) %>% 
+  bind_log_odds(state, text, count) %>% 
+  arrange(-log_odds_weighted) 
+ 
+wlo_state %>% 
+  filter(text == "fleet")
+
+wlo_state %>% 
+  filter(state == "NC")
+```
+
+```{r}
+method <- c( "average", "single", "complete", "ward")
+names(method) <- c( "average", "single", "complete", "ward")
+
+metric = c("euclidean", "manhattan")
+names(metric) = c("euclidean", "manhattan")
+
+linkage <- c("ward.D", "ward.D2", "single", "complete", "average", "mcquitty", "median", "centroid")
+names(linkage) <- c("ward.D", "ward.D2", "single", "complete", "average", "mcquitty", "median", "centroid")
+
+distance = c("euclidean", "maximum", "manhattan", "canberra", "binary", "minkowski")
+names(distance) = c("euclidean", "maximum", "manhattan", "canberra", "binary", "minkowski")
+
+# function to compute coefficient
+ac <- function(x, y) {
+  agnes(data_leg, method = x, metric = y)$ac
+}
+
+distance = "binary"
+linkage = "mcquitty"
+
+make_agg_coeff =  function(x, y) {
+  data_leg %>%  
+    dist(method = x) %>% 
+    hclust(method = y) %>% 
+    coef.hclust()
+}
+
+plus2 <- function(x, y, ...) x + y
+ac <- function(method, metric, ...) agnes(data_leg, method, metric)$ac
+```
+
+## Word Count
+Counting the occurrence of each token and filtering only the ones occuring more than 15 times in a bill. 
+
+```{r}
+bills_parsed <- data_token_list_exp_token %>%
+add_count(word) %>%
+  filter(n > 15) %>%
+  distinct(bill_name, word, .keep_all = TRUE) %>%
+  na.omit()
+```
+
+
+## PCA Analysis
+```{r}
+data_token_list_exp_token_df <- bills_parsed %>%
+  #select(-ingredient_number, -row_id, -measure) %>%
+  pivot_wider(names_from = bill_name, values_from = n, values_fill = 0) %>%
+  #janitor::clean_names() %>%
+  na.omit()
+```
+
+
+```{r}
+library(tidymodels)
+
+pca_rec <- recipe(~., data = data_token_list_exp_token_df) %>%
+    update_role(state,  word , new_role = "id") %>%
+    #update_role(state, bill_name, word , new_role = "predictor") %>%
+  step_normalize(all_predictors()) %>%
+  step_pca(all_predictors())
+
+pca_prep <- prep(pca_rec)
+
+pca_prep
+```
+```{r}
+tidied_pca <- tidy(pca_prep, 2)
+
+tidied_pca %>%
+  filter(component %in% paste0("PC", 1:5)) %>%
+  mutate(component = fct_inorder(component)) %>%
+  ggplot(aes(value, terms, fill = terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~component, nrow = 1) +
+  labs(y = NULL)
+```
+
+
+## PCA Analysis
+```{r}
+data_token_list_exp_token_df <- bills_parsed %>%
+  #select(-ingredient_number, -row_id, -measure) %>%
+  pivot_wider(names_from = word, values_from = n, values_fill = 0) %>%
+  #janitor::clean_names() %>%
+  na.omit()
+```
+
+
+```{r}
+library(tidymodels)
+
+pca_rec <- recipe(~., data = data_token_list_exp_token_df) %>%
+    update_role(state,  bill_name , new_role = "id") %>%
+    #update_role(state, bill_name, word , new_role = "predictor") %>%
+  step_normalize(all_predictors()) %>%
+  step_pca(all_predictors())
+
+pca_prep <- prep(pca_rec)
+
+pca_prep
+```
+
+
+```{r}
+tidied_pca <- tidy(pca_prep, 2)
+
+tidied_pca %>%
+  filter(component %in% paste0("PC", 1:5)) %>%
+  mutate(component = fct_inorder(component)) %>%
+  ggplot(aes(value, terms, fill = terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~component, nrow = 1) +
+  labs(y = NULL)
+```
+
+```{r}
+library(remotes)
+#install_github("juliasilge/tidylo")
+library(tidyverse)
+library(tidylo)
+
+bills_parsed <- bills_parsed%>%
+  group_by(word) %>%
+  count(state, wt = n, sort = TRUE) %>%
+  ungroup
+
+name_log_odds <- bills_parsed %>%
+  bind_log_odds(state, word, n) 
+
+name_log_odds %>%
+  arrange(-log_odds_weighted)
+```
+```{r}
+name_log_odds %>%
+    group_by(state) %>%
+    top_n(10, log_odds_weighted) %>%
+    ungroup %>%
+    mutate(sate = as.factor(state),
+           name = fct_reorder(word, log_odds_weighted)) %>%
+    ggplot(aes(word, log_odds_weighted, fill = state)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~state, scales = "free_y") +
+    coord_flip() +
+    scale_y_continuous(expand = c(0,0)) +
+    labs(y = "Log odds ratio, weighted by words",
+         x = NULL,
+         title = "What were the most specific words of each state?",
+         subtitle = "From AV Legislations")
+```
+
