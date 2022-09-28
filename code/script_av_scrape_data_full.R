@@ -290,6 +290,55 @@ climbing_comb
 
 
 
+library(tidyverse)
+library(rvest)
+url = "https://www.ncsl.org/research/transportation/autonomous-vehicles-legislative-database.aspx"
+
+html <- read_html(url)
+
+result <- html_form(html) %>%
+  pluck(1) %>%
+  html_form_set(
+    'dnn$ctr81355$StateNetDB$ckBxAllTopics' = "true",
+    'dnn$ctr81355$StateNetDB$ckBxAllStates' = "true",
+    'dnn$ctr81355$StateNetDB$ddlYear'       = "2022") %>%
+  html_form_submit("dnn$ctr81355$StateNetDB$btnSearch")
+
+
+
+
+
+# result_formatted <-
+  result %>%
+  read_html() %>%
+  html_nodes(xpath = "//div[contains(@id, 'linkList')]/") %>%
+  html_nodes(xpath = "./following-sibling::text()[1]|./following-sibling::[1]") %>%
+  html_text(trim = TRUE) %>%
+  tibble(line = .) %>%
+  filter(line != "")
+
+
+
+
+
+
+
+# result_formatted <-
+result %>%
+  read_html() %>%
+  html_node("#dnn_ctr81355_StateNetDB_linkList") %>%
+  # html_nodes("//div[@id = 'dnn_ctr81355_StateNetDB_btnSearch']")
+  # html_nodes(xpath = "//div[contains(@id, 'linkList')]/") %>%
+  html_nodes(xpath = "./following-sibling::text()[1]")
+  html_nodes(xpath = "./following-sibling::text()[1]|./following-sibling::[1]") %>%
+  html_text(trim = TRUE) %>%
+  tibble(line = .) %>%
+  filter(line != "")
+
+
+
+post
+
 
 
 

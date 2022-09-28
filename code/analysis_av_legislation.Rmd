@@ -194,7 +194,8 @@ rec_clean_text = recipe( ~ state + bill_name + text, data = legislation_df_sampl
                                ,stopwords = stop_words$word
                                ,strip_numeric = TRUE
                                )
-                )  #this step maintains word sequence
+                )  %>% 
+  step_tokenfilter()
 ```
 
 #### Pairwise Data 
@@ -332,7 +333,7 @@ wlo_state %>%
 
 
 
-
+# DO NOT DO 
 
 
 
