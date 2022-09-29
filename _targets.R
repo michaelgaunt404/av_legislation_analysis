@@ -10,8 +10,8 @@ library(here)
 
 # Set target options:
 tar_option_set(
-  packages = c("tibble", "here", "tidyverse", "gauntlet", "lubridate"
-               ,"readxl"
+  packages = c("tibble", "here", "tidyverse", "gauntlet", "lubridate", "purrr"
+               ,"readxl", "rvest"
                # ,"crosstalk", "plotly"
                ), # packages that your targets need to run
   format = "rds" # default storage format
@@ -32,5 +32,7 @@ tar_source()
 list(
   tar_target(av_leg_summary,
              here("data", "manual_extract_av_leg_summary.xlsx"), format = "file")
+  ,tar_target(data_av_leg_sum, proces_av_leg_sum(av_leg_summary))
+  ,tar_target(data_av_leg_full, scrape_av_bill_legislation())
 
 )

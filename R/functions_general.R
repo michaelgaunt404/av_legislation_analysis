@@ -65,8 +65,104 @@ proces_av_leg_sum = function(file){
 
 }
 
-##sub header 1==================================================================
+#scraping functions============================================================
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+scrape_av = function(url){
+  xml2::read_html(url)
+}
+
+safe_scrape_av = purrr::safely(scrape_av)
+
+good_results_only = function(data){
+  data %>%
+    .["result"] %>%
+    .[[1]]
+}
+
+safe_scrape_av_good = function(object){
+  print("GO")
+  object %>%
+    .[[1]] %>%
+    safe_scrape_av() %>%
+    good_results_only()
+}
+
+extract_full_text = function(object){
+  object %>%
+    html_nodes(".text") %>%
+    html_text()
+}
+
+extract_small_text = function(object){
+  object %>%
+    html_nodes(".code .indent") %>%
+    html_text()
+}
+
+scrape_av_bill_legislation = function(){
+
+  url = "https://www.ncsl.org/research/transportation/autonomous-vehicles-legislative-database.aspx"
+
+  html <- read_html(url)
+
+  object_xml = c(2022:2017) %>%
+    paste0() %>%
+    map(
+      ~{
+        result <- html_form(html) %>%
+          pluck(1) %>%
+          html_form_set(
+            'dnn$ctr81355$StateNetDB$ckBxAllTopics' = "true",
+            'dnn$ctr81355$StateNetDB$ckBxAllStates' = "true",
+            'dnn$ctr81355$StateNetDB$ddlYear'       = .x) %>%
+          html_form_submit("dnn$ctr81355$StateNetDB$btnSearch")
+
+        result_formatted <- result %>%
+          read_html() %>%
+          rvest::html_nodes(".ModNCSLStateNetC div div+ div a")
+
+        result_formatted_clean = result_formatted %>%
+          html_attr("href") %>%
+          reduce(rbind) %>%
+          data.frame() %>%
+          setNames("href") %>%
+          mutate(bill_id = gsub(".*ID:bill:", "\\1", href) %>%
+                   gsub('&ciq.*', "\\1", .) %>%
+                   str_trim()) %>%
+          mutate(state = str_trunc(bill_id, 2, "right", "")
+                 ,year = str_sub(bill_id, 3) %>%
+                   str_trunc(., 4, "right", "")
+                 ,chamber = str_sub(bill_id, 3) %>%
+                   str_remove_all("[:digit:]")
+                 ,number = str_sub(bill_id, 3) %>%
+                   str_remove_all(".*[:alpha:]")
+                 ,bill_id_clean = str_glue("{state}_{chamber}_{number}")) %>%
+          data.frame() %>%
+          select(bill_id:bill_id_clean, everything()) %>%
+          na.omit()
+      }
+    ) %>%
+    reduce(bind_rows) %>%
+    unique()
+
+  full_result = object_xml %>%
+    # sample_n(2) %>%
+    group_by(bill_id, state, year, chamber, number, bill_id_clean) %>%
+    nest() %>%
+    mutate(scraped_xml = map(data
+                             ,~{
+                               Sys.sleep(1)
+                               safe_scrape_av_good(.x)
+                             })) %>%
+    mutate(scraped_full_text = map(scraped_xml, extract_full_text)) %>%
+    mutate(scraped_small_text = map(scraped_xml, extract_small_text))
+
+
+  full_result %>%
+    unnest(cols = c(scraped_full_text, scraped_small_text))
+
+}
 
 ##sub header 2==================================================================
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

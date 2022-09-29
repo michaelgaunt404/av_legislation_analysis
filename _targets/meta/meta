@@ -1,3 +1,13 @@
 name|type|data|command|depend|seed|path|time|size|bytes|format|repository|iteration|parent|children|seconds|warnings|error
-.Random.seed|object|dfe17d5a8f1e6af4|||||||||||||||
+.Random.seed|object|5b1d563327975bf6|||||||||||||||
 av_leg_summary|stem|0204c1c782ba0f5d|ec4d7458fbc94fcb|4e3739ef91745af0|803493744|C:/Users/USMG687637/Documents/071_projects/av_legislation_analysis/data/manual_extract_av_leg_summary.xlsx|t19263.0457643545s|dfd64d59f2d19d44|104890|file|local|vector|||2.17|package tibble was built under R version 4.1.3. package tidyverse was built under R version 4.1.3. package ggplot2 was built under R version 4.1.3. package tidyr was built under R version 4.1.3. package readr was built under R version 4.1.3. package dplyr was built under R version 4.1.3. package forcats was built under R version 4.1.1. package lubridate was built under R version 4.1.3|
+data_av_leg_full|stem|a762c1a9e2af33b1|a5135ecb5fc56442|9eba03c417ba5df5|602736791||t19264.6436011895s|73a2b7c7dcd76e0d|18425298|rds|local|vector|||119.36|package tibble was built under R version 4.1.3. package tidyverse was built under R version 4.1.3. package ggplot2 was built under R version 4.1.3. package tidyr was built under R version 4.1.3. package readr was built under R version 4.1.3. package dplyr was built under R version 4.1.3. package forcats was built under R version 4.1.1. package lubridate was built under R version 4.1.3. package rvest was built under R version 4.1.3|
+data_av_leg_sum|stem|06fae256b7697b3f|0f069dfffbbebe86|8fe018f2ee8db24e|-1594248164||t19264.5586133713s|f4b746f271dc02f7|42438|rds|local|vector|||0.28||
+extract_full_text|function|844cdb58d0a4cd98|||||||||||||||
+extract_small_text|function|1c8d677ba093d5c7|||||||||||||||
+good_results_only|function|4316ef48dfc21a80|||||||||||||||
+proces_av_leg_sum|function|0f4369d26061f59d|||||||||||||||
+safe_scrape_av|function|00758262fad8ce25|||||||||||||||
+safe_scrape_av_good|function|56b098a9d09ba5a3|||||||||||||||
+scrape_av|function|5e7df9fc5b8bddbb|||||||||||||||
+scrape_av_bill_legislation|function|d3a8bb18882176d6|||||||||||||||
