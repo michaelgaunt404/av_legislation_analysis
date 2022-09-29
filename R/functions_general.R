@@ -106,7 +106,7 @@ scrape_av_bill_legislation = function(){
 
   html <- read_html(url)
 
-  object_xml = c(2022:2017) %>%
+  object_xml = c(2022:2018) %>%
     paste0() %>%
     map(
       ~{
@@ -157,7 +157,6 @@ scrape_av_bill_legislation = function(){
                              })) %>%
     mutate(scraped_full_text = map(scraped_xml, extract_full_text)) %>%
     mutate(scraped_small_text = map(scraped_xml, extract_small_text))
-
 
   full_result %>%
     unnest(cols = c(scraped_full_text, scraped_small_text))
