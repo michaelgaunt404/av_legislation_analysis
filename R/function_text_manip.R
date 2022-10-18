@@ -59,25 +59,25 @@ ngram_rec <- function(data, ngram_options) {
     step_tf(summary)
 }
 
-ngram_options = list(n = 2, n_min = 2, lowercase = T
-                     ,stopwords = stop_words$word)
-
-recipe = ngram_rec(data = data_av_leg_sum, ngram_options = ngram_options)
-
-data_test = recipe %>%  prep() %>%  juice() %>%
-  pivot_longer(cols = starts_with("tf")) %>%
-  mutate(count = 1) %>%
-  count_percent_zscore(grp_c = c(name)
-                       ,grp_p = c()
-                       ,col = value) %>%
-  arrange(desc(count)) %>%
-  view()
-
-
-data_test %>%
-  filter(value != 0) %>%
-  bind_log_odds(state, name, value) %>%
-  arrange(desc(log_odds_weighted))
+# ngram_options = list(n = 3, n_min = 1, lowercase = T
+#                      ,stopwords = stop_words$word)
+#
+# recipe = ngram_rec(data = data_av_leg_sum, ngram_options = ngram_options)
+#
+# data_test = recipe %>%  prep() %>%  juice() %>%
+#   pivot_longer(cols = starts_with("tf")) %>%
+#   mutate(count = 1) %>%
+#   count_percent_zscore(grp_c = c(name)
+#                        ,grp_p = c()
+#                        ,col = value) %>%
+#   arrange(desc(count)) %>%
+#   view()
+#
+#
+# data_test %>%
+#   filter(value != 0) %>%
+#   bind_log_odds(state, name, value) %>%
+#   arrange(desc(log_odds_weighted))
 
 
 ##sub header 1==================================================================

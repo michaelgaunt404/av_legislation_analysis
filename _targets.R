@@ -34,6 +34,7 @@ list(
              here("data", "manual_extract_av_leg_summary.xlsx"), format = "file")
   ,tar_target(data_av_leg_sum, proces_av_leg_sum(av_leg_summary))
   ,tar_target(data_av_leg_full, scrape_av_bill_legislation())
+  ,tar_target(data_av_leg_sum_ngrams, process_summary_text(data = data_av_leg_sum))
 )
 
 

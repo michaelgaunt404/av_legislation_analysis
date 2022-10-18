@@ -1,12 +1,17 @@
 name|type|data|command|depend|seed|path|time|size|bytes|format|repository|iteration|parent|children|seconds|warnings|error
-.Random.seed|object|e7b39bd7014310a3|||||||||||||||
+.Random.seed|object|3ba78ce3de2df1ac|||||||||||||||
 av_leg_summary|stem|0204c1c782ba0f5d|ec4d7458fbc94fcb|4e3739ef91745af0|803493744|C:/Users/USMG687637/Documents/071_projects/av_legislation_analysis/data/manual_extract_av_leg_summary.xlsx|t19263.0457643545s|dfd64d59f2d19d44|104890|file|local|vector|||2.17|package tibble was built under R version 4.1.3. package tidyverse was built under R version 4.1.3. package ggplot2 was built under R version 4.1.3. package tidyr was built under R version 4.1.3. package readr was built under R version 4.1.3. package dplyr was built under R version 4.1.3. package forcats was built under R version 4.1.1. package lubridate was built under R version 4.1.3|
+clean_stopwords|function|3d814302835a4722|||||||||||||||
 data_av_leg_full|stem|39082408b49d657c|a5135ecb5fc56442|f1c20d28a3790cae|602736791||t19264.812054837s|7f9f3c74a800a0df|20653914|rds|local|vector|||716.58|package tibble was built under R version 4.1.3. package tidyverse was built under R version 4.1.3. package ggplot2 was built under R version 4.1.3. package tidyr was built under R version 4.1.3. package readr was built under R version 4.1.3. package dplyr was built under R version 4.1.3. package forcats was built under R version 4.1.1. package lubridate was built under R version 4.1.3. package rvest was built under R version 4.1.3|
 data_av_leg_sum|stem|06fae256b7697b3f|0f069dfffbbebe86|8fe018f2ee8db24e|-1594248164||t19264.5586133713s|f4b746f271dc02f7|42438|rds|local|vector|||0.28||
+data_av_leg_sum_ngrams|stem|455fb4b3e8f24f68|4fb90bdc7162f6cb|13bc5bb2963e1159|495933095||t19283.739691821s|e27cfd5e53d72d46|12755889|rds|local|vector|||1.91||
 extract_full_text|function|844cdb58d0a4cd98|||||||||||||||
 extract_small_text|function|1c8d677ba093d5c7|||||||||||||||
 good_results_only|function|4316ef48dfc21a80|||||||||||||||
+ngram_rec|function|e668dd148615cdfb|||||||||||||||
+pre_filter_data_LOGODDDS|function|8cdbf25d76a15008|||||||||||||||
 proces_av_leg_sum|function|0f4369d26061f59d|||||||||||||||
+process_summary_text|function|d847613811a81c5d|||||||||||||||
 safe_scrape_av|function|00758262fad8ce25|||||||||||||||
 safe_scrape_av_good|function|56b098a9d09ba5a3|||||||||||||||
 scrape_av|function|5e7df9fc5b8bddbb|||||||||||||||
