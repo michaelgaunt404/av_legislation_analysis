@@ -165,6 +165,54 @@ scrape_av_bill_legislation = function(){
 
 ##sub header 2==================================================================
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ = tar_read("data_av_leg_sum")
+
+process = function(data){
+  # data = tar_read("data_av_leg_sum")
+
+  rec_tf = recipe(~ bill_num + summary, data = data) %>%
+    step_mutate(text = replace_contraction(summary)) %>%
+    step_mutate(text = lemmatize_strings(summary)) %>%
+    # step_stem(text) %>% #i dont like the results of this, may change
+    step_tokenize(summary,
+                  token = "words",
+                  options = list(lowercase = TRUE
+                                 ,strip_punct = TRUE
+                                 ,stopwords = stop_words$word
+                                 ,strip_numeric = TRUE
+                  )
+    ) %>%
+    step_tf(summary) #this step removes word sequence
+  # %>% step_nzv(all_predictors()) #this may remove a word that is in a bill many times but in no others, remove for now
+
+  data_rec_tf = rec_tf %>%
+    prep() %>%
+    juice() %>%
+    filter(!duplicated(bill_name))
+
+  data_rec_tf_long = data_rec_tf %>%
+    pivot_longer(cols = starts_with("tf_text")
+                 ,names_to = "text"
+                 ,values_to = "count") %>%
+    mutate(text = str_remove_all(text, "tf_text_"))
+
+
+  data_rec_tf_long_state = data_rec_tf_long %>%
+    group_by(state, text) %>%
+    summarise(count = sum(count), .groups = "drop")
+
+
+
+
+
+
+
+
+}
+
+
+
+
 
 #script end=====================================================================
 

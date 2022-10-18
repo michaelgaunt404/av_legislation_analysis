@@ -15,12 +15,12 @@
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #content in this section should be removed if in production - ok for dev
 
-library(targets)
-library(here)
-library(readxl)
-
-library(tidyverse)
-library(gauntlet)
+# library(targets)
+# library(here)
+# library(readxl)
+#
+# library(tidyverse)
+# library(gauntlet)
 # library(lubridate)
 
 # library(sf)
@@ -37,6 +37,19 @@ library(gauntlet)
 #
 # library(htmltools)
 
+pkgs = c("tibble", "here", "tidyverse", "gauntlet", "lubridate", "purrr"
+         ,"readxl", "rvest"
+         ,"tidymodels", "tidytext", "textclean", "textstem", "textrecipes"
+)
+
+ipak <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg))
+    install.packages(new.pkg, dependencies = TRUE)
+  sapply(pkg, require, character.only = TRUE)
+}
+
+ipak(pkgs)
 
 
 #script end=====================================================================

@@ -12,8 +12,8 @@ library(here)
 tar_option_set(
   packages = c("tibble", "here", "tidyverse", "gauntlet", "lubridate", "purrr"
                ,"readxl", "rvest"
-               # ,"crosstalk", "plotly"
-               ), # packages that your targets need to run
+               ,"tidymodels", "tidytext", "textclean", "textstem", "textrecipes"
+  ), # packages that your targets need to run
   format = "rds" # default storage format
   # Set other options as needed.
 )
@@ -34,5 +34,10 @@ list(
              here("data", "manual_extract_av_leg_summary.xlsx"), format = "file")
   ,tar_target(data_av_leg_sum, proces_av_leg_sum(av_leg_summary))
   ,tar_target(data_av_leg_full, scrape_av_bill_legislation())
-
 )
+
+
+
+
+
+
